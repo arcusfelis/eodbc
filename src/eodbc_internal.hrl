@@ -22,8 +22,7 @@
 %% 
 
 %% Path to the c-program.
--define(SERVERDIR, filename:nativename(
-		     filename:join(code:priv_dir(eodbc), "bin"))).
+-define(SERVERDIR, filename:nativename(code:priv_dir(eodbc))).
 
 %% Name of the C program 
 -define(SERVERPROG, "eodbcserver").

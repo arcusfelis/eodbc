@@ -434,13 +434,16 @@ init(Args) ->
     
     erlang:monitor(process, ClientPid),
     
-    Inet = case gen_tcp:listen(0, [inet6, {ip, loopback}]) of
-	       {ok, Dummyport} ->
-		   gen_tcp:close(Dummyport),
-		   inet6;
-	       _ ->
-		   inet
-	   end,
+    %% Disable inet6 support, because port exits with code 12
+    %% (need to figure out how to set HAVE_STRUCT_SOCKADDR_IN6_SIN6_ADDR variable
+    Inet = inet,
+%   Inet = case gen_tcp:listen(0, [inet6, {ip, loopback}]) of
+%          {ok, Dummyport} ->
+%   	   gen_tcp:close(Dummyport),
+%   	   inet6;
+%          _ ->
+%   	   inet
+%      end,
 
     {ok, ListenSocketSup} =
 	gen_tcp:listen(0, [Inet, binary, {packet, ?LENGTH_INDICATOR_SIZE},
@@ -497,6 +500,7 @@ handle_call(Request = {Client, _, Timeout}, From,
 handle_call({Client, _, _}, From, 
 	    State = #state{owner = Client,  
 			   num_timeouts = N}) when N >= ?MAX_SEQ_TIMEOUTS ->
+    receive_exit_status(State),
     gen_server:reply(From, {error, connection_closed}), 
     {stop, too_many_sequential_timeouts, State#state{reply_to = undefined}};
 
@@ -536,9 +540,11 @@ handle_msg({connect, ODBCCmd, AutoCommitMode, SrollableCursors},
 					     sup_socket = SupSocket}, 
 		     Timeout};
 		{error, Reason} ->
+            receive_exit_status(State),
 		    {stop, Reason, {error, connection_closed}, NewState}
 	    end;
 	{error, Reason} ->
+        receive_exit_status(State),
 	    {stop, Reason, {error, connection_closed}, NewState}
     end;    
     
@@ -988,3 +994,10 @@ string_terminate_value(null) ->
 
 port_timeout() ->
   application:get_env(?MODULE, port_timeout, ?ODBC_PORT_TIMEOUT).
+
+receive_exit_status(State) ->
+    receive
+        {Port, {exit_status,Status}} when Port =:= State#state.erlang_port ->
+            error_logger:error_msg("exit_status=~p", [Status])
+    after 0 -> ok
+    end.
