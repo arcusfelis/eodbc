@@ -23,10 +23,10 @@
 
 %% Path to the c-program.
 -define(SERVERDIR, filename:nativename(
-		     filename:join(code:priv_dir(odbc), "bin"))).
+		     filename:join(code:priv_dir(eodbc), "bin"))).
 
 %% Name of the C program 
--define(SERVERPROG, "odbcserver").
+-define(SERVERPROG, "eodbcserver").
 
 %% Constats defining the command protocol between the erlang control
 %% process and the port program. These constants must also be defined

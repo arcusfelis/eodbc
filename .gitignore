@@ -1,1 +1,4 @@
 ebin
+c_src/*.o
+c_src/*.d
+priv/eodbcserver

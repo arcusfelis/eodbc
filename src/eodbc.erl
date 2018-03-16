@@ -20,11 +20,11 @@
 
 %
 
--module(odbc).
+-module(eodbc).
 
 -behaviour(gen_server).
 
--include("odbc_internal.hrl").
+-include("eodbc_internal.hrl").
 
 -define(ODBC_PORT_TIMEOUT, 5000).
 
@@ -85,10 +85,10 @@
 %% is temporary. see application(3)
 %%--------------------------------------------------------------------
 start() -> 
-    application:start(odbc).
+    application:start(eodbc).
 
 start(Type) -> 
-    application:start(odbc, Type).
+    application:start(eodbc, Type).
 
 %%--------------------------------------------------------------------
 %% Function: stop() -> ok
@@ -96,7 +96,7 @@ start(Type) ->
 %% Description: Stops the odbc application.
 %%--------------------------------------------------------------------
 stop() -> 
-    application:stop(odbc).
+    application:stop(eodbc).
 
 %%-------------------------------------------------------------------------
 %% connect(ConnectionStr, Options) -> {ok, ConnectionReferense} |
@@ -108,7 +108,7 @@ stop() ->
 connect(ConnectionStr, Options) when is_list(ConnectionStr), is_list(Options) ->
     
     %% Spawn the erlang control process.
-    try  supervisor:start_child(odbc_sup, [[{client, self()}]]) of
+    try  supervisor:start_child(eodbc_sup, [[{client, self()}]]) of
 	 {ok, Pid} ->
 	    connect(Pid, ConnectionStr, Options);
 	 {error, Reason} ->

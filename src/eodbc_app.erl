@@ -19,26 +19,19 @@
 %%
 
 %%
--module(odbc_sup).
+%%%----------------------------------------------------------------------
+%%% Purpose : The main application file of ODBC.
+%%%----------------------------------------------------------------------
 
--behaviour(supervisor).
+-module(eodbc_app).
 
--export([init/1]).
-
-init([Name]) ->
-    RestartStrategy = simple_one_for_one,
-    MaxR = 0,
-    MaxT = 3600,
-    StartFunc = {odbc, start_link_sup, []},
-    Restart = temporary, % E.g. should not be restarted
-    Shutdown = 7000,
-    Modules = [odbc],
-    Type = worker,
-    ChildSpec = {Name, StartFunc, Restart, Shutdown, Type, Modules},
-    {ok, {{RestartStrategy, MaxR, MaxT}, [ChildSpec]}}.
+-export([start/2, stop/1]).
 
 
+start(_Type, Name) ->
+    supervisor:start_link({local, eodbc_sup}, eodbc_sup, [Name]).
 
 
-
+stop([]) ->
+    ok.
 
