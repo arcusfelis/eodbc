@@ -131,6 +131,7 @@
 
 #include "ei.h"
 #include "odbcserver.h"
+#include <syslog.h>
 
 /* ---------------- Main functions ---------------------------------------*/
 static void spawn_sup(const char *port);
@@ -243,6 +244,13 @@ static void * retrive_param_values(param_array *Param);
 
 static db_column retrive_binary_data(db_column column, int column_nr,
 				     db_state *state);
+
+static void retrive_long_data(db_column column, int column_nr,
+                     SQLSMALLINT TargetType,
+				     db_state *state,
+                     char** bufferptr_out,
+                     int* totallen_out);
+
 static db_result_msg retrive_scrollable_cursor_support_info(db_state
 							    *state);
 static int num_out_params(int num_of_params, param_array* params);
@@ -269,6 +277,9 @@ static void str_tolower(char *str, int len);
 
 int main(void)
 {
+    openlog ("eodbcserver", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_LOCAL1);
+    syslog (LOG_INFO, "eodbcserver started");
+
     byte *msg = NULL;
     char *temp = NULL, *supervisor_port = NULL, *odbc_port = NULL;
     size_t length;
@@ -1477,6 +1488,8 @@ static db_result_msg encode_row_count(SQLINTEGER num_of_rows,
 static void encode_column_dyn(db_column column, int column_nr,
 			      db_state *state)
 {
+    SQLRETURN result;
+
     TIMESTAMP_STRUCT* ts;
     if (column.type.len == 0 ||
 	column.type.strlen_or_indptr == SQL_NULL_DATA) {
@@ -1496,12 +1509,42 @@ static void encode_column_dyn(db_column column, int column_nr,
             ei_x_encode_ulong(&dynamic_buffer(state), ts->second);
             break;
 	case SQL_C_CHAR:
-		if binary_strings(state) {
-			 ei_x_encode_binary(&dynamic_buffer(state), 
-					    column.buffer,column.type.strlen_or_indptr);
-		} else {
-			ei_x_encode_string(&dynamic_buffer(state), column.buffer);
-		}
+            /*
+        syslog (LOG_INFO, "strlen_or_indptr=%d colsize=%d",
+                column.type.strlen_or_indptr,
+                column.type.col_size);
+                */
+        if (column.type.strlen_or_indptr < column.type.col_size)
+        {
+			if binary_strings(state) {
+				 ei_x_encode_binary(&dynamic_buffer(state), 
+						    column.buffer,column.type.strlen_or_indptr);
+			} else {
+				ei_x_encode_string(&dynamic_buffer(state), column.buffer);
+			}
+        } else {
+            /* oops, the result value is too long.
+               extract part by part.
+               handles https://bugs.erlang.org/browse/ERL-421
+
+               ODBC truncates data for LONGTEXT and BLOB
+               */
+            char *bufferptr;
+            /* in bytes */
+            int totallen;
+
+            /* writes info into bufferptr and totallen
+               allocates bufferptr */
+            retrive_long_data(column, column_nr, SQL_C_CHAR, state, &bufferptr, &totallen);
+
+			if binary_strings(state) {
+				 ei_x_encode_binary(&dynamic_buffer(state), bufferptr, totallen);
+			} else {
+				ei_x_encode_string(&dynamic_buffer(state), bufferptr);
+			}
+
+            free(bufferptr);
+        }
 	    break;
 	case SQL_C_WCHAR:
             ei_x_encode_binary(&dynamic_buffer(state), 
@@ -2595,6 +2638,7 @@ static void * retrive_param_values(param_array *Param)
    SQL_SUCCESS, indicating that all data for the column has been retrieved.
 */
 
+
 static db_column retrive_binary_data(db_column column, int column_nr,
 				     db_state *state)
 { 
@@ -2627,6 +2671,58 @@ static db_column retrive_binary_data(db_column column, int column_nr,
   
     if (result == SQL_SUCCESS) {
 	return column;
+    } else {
+	DO_EXIT(EXIT_BIN); 
+    }
+}
+
+/* This function does not touch column data */
+static void retrive_long_data(db_column column, int column_nr,
+                     SQLSMALLINT TargetType,
+				     db_state *state,
+                     char** bufferptr_out,
+                     int* totallen_out)
+{ 
+    char *bufferptr;
+    char *outputptr;
+    /* Nobody knows if StrLen_or_IndPtr works or not.
+       If it works, it shows how much data is rest. */
+    SQLLEN * StrLen_or_IndPtr;
+
+    /* in bytes */
+    int totallen, blocklen, outputlen, result;
+    diagnos diagnos;
+
+    blocklen = MAXCOLSIZE;
+    totallen = MAXCOLSIZE;
+    bufferptr = outputptr = (void*) safe_malloc(blocklen);
+
+    result = SQLGetData(statement_handle(state),
+            (SQLSMALLINT)(column_nr+1),
+			TargetType, outputptr,
+			blocklen, &StrLen_or_IndPtr);
+
+    while (result == SQL_SUCCESS_WITH_INFO) {
+
+	diagnos = get_diagnos(SQL_HANDLE_STMT, statement_handle(state), extended_errors(state));
+    
+	if(strcmp((char *)diagnos.sqlState, TRUNCATED) == 0) {
+	    outputlen = totallen - 1;
+	    totallen = outputlen + blocklen;
+        // extend bufferptr buffer
+	    bufferptr = safe_realloc((void *) bufferptr, totallen);
+	    outputptr = bufferptr + outputlen;
+	    result = SQLGetData(statement_handle(state),
+				(SQLSMALLINT)(column_nr+1), TargetType,
+				outputptr, blocklen,
+				&StrLen_or_IndPtr);
+	}
+    }
+  
+    if (result == SQL_SUCCESS) {
+        *bufferptr_out = bufferptr;
+        *totallen_out = totallen;
+        return;
     } else {
 	DO_EXIT(EXIT_BIN); 
     }
