@@ -92,6 +92,7 @@
 #define EXIT_DESC		 21
 #define EXIT_BIND		 22
 #define EXIT_DRIVER_INFO         23
+#define EXIT_LONG_DATA   40
 
 /* COL_SIZE */
 #define COL_SQL_SMALLINT 5

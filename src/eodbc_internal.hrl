@@ -104,6 +104,7 @@
 -define(EXIT_DESC,		 21).
 -define(EXIT_BIND,		 22).
 -define(EXIT_DRIVER_INFO,        23).
+-define(EXIT_LONG_DATA,        40).
 
 %% Misc constants
 -define(DEFAULT_TIMEOUT, infinity).
@@ -160,6 +161,8 @@
 		 could_not_bind_data_buffers;
 	    (?EXIT_DRIVER_INFO) ->
 		 collecting_of_driver_information_faild;
+        (?EXIT_LONG_DATA) ->
+         extracting_long_data_failed;
 	    (_) ->
 		 killed
 	 end)).

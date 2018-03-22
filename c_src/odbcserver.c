@@ -1528,12 +1528,10 @@ static void encode_column_dyn(db_column column, int column_nr,
             ei_x_encode_ulong(&dynamic_buffer(state), ts->second);
             break;
 	case SQL_C_CHAR:
-            /*
         syslog (LOG_INFO, "strlen_or_indptr=%d colsize=%d",
                 column.type.strlen_or_indptr,
                 column.type.col_size);
-                */
-        if (column.type.strlen_or_indptr < column.type.col_size)
+        if (column.type.strlen_or_indptr <= column.type.col_size)
         {
 			if binary_strings(state) {
 				 ei_x_encode_binary(&dynamic_buffer(state), 
@@ -2743,7 +2741,7 @@ static void retrive_long_data(db_column column, int column_nr,
         *totallen_out = totallen;
         return;
     } else {
-	DO_EXIT(EXIT_BIN); 
+	DO_EXIT(EXIT_LONG_DATA); 
     }
 }
 
