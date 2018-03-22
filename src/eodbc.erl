@@ -820,10 +820,12 @@ connect(ConnectionReferense, ConnectionStr, Options) ->
 	connection_config(tuple_row, Options),
     {BinaryStrings, _} = connection_config(binary_strings, Options),
     {ExtendedErrors, _} = connection_config(extended_errors, Options),
+    {ReturnTypes, _} = connection_config(return_types, Options),
 
     ODBCCmd = 
 	[?OPEN_CONNECTION, C_AutoCommitMode, C_TraceDriver, 
-	 C_SrollableCursors, C_TupleRow, BinaryStrings, ExtendedErrors, ConnectionStr],
+	 C_SrollableCursors, C_TupleRow, BinaryStrings, ExtendedErrors, ReturnTypes,
+     ConnectionStr],
     
     %% Send request, to open a database connection, to the control process.
     case call(ConnectionReferense, 
@@ -870,6 +872,8 @@ connection_default(trace_driver) ->
 connection_default(scrollable_cursors) ->
     {?ON, on};
 connection_default(binary_strings) ->
+    {?OFF, off};
+connection_default(return_types) ->
     {?OFF, off};
 connection_default(extended_errors) ->
     {?OFF, off}.

@@ -473,6 +473,7 @@ static db_result_msg db_connect(byte *args, db_state *state)
     byte *connStrIn; 
     int erl_auto_commit_mode, erl_trace_driver,
 	    use_srollable_cursors, tuple_row_state, binary_strings,
+        return_types,
 	    extended_errors;
   
     erl_auto_commit_mode = args[0];
@@ -481,7 +482,8 @@ static db_result_msg db_connect(byte *args, db_state *state)
     tuple_row_state = args[3];
     binary_strings = args[4];
     extended_errors = args[5];
-    connStrIn = args + 6 * sizeof(byte);
+    return_types = args[6];
+    connStrIn = args + 7 * sizeof(byte);
 
     if(tuple_row_state == ON) {
 	    tuple_row(state) = TRUE;  
@@ -505,6 +507,12 @@ static db_result_msg db_connect(byte *args, db_state *state)
 	    extended_errors(state) = TRUE;
     } else {
 	    extended_errors(state) = FALSE;
+    }
+
+    if(return_types == ON) {
+	    return_types(state) = TRUE;
+    } else {
+	    return_types(state) = FALSE;
     }
 
     init_driver(erl_auto_commit_mode, erl_trace_driver, state); 
@@ -1344,8 +1352,19 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
 			 &columns(state)[i].type.strlen_or_indptr)))
 			DO_EXIT(EXIT_BIND);
 		}
-		ei_x_encode_string_len(&dynamic_buffer(state),
-				       (char *)name, name_len);
+
+        if return_types(state) {
+            ei_x_encode_tuple_header(&dynamic_buffer(state), 2);
+            encode_data_type(sql_type, size, dec_digits, state);
+
+			ei_x_encode_string_len(&dynamic_buffer(state),
+					       (char *)name, name_len);
+        }
+        else
+        {
+			ei_x_encode_string_len(&dynamic_buffer(state),
+					       (char *)name, name_len);
+        }
 	    }
 	    else {
 		columns(state)[i].type.len = 0;

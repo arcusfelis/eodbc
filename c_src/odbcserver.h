@@ -182,6 +182,7 @@ typedef struct {
     Boolean param_query;
     Boolean out_params;
     Boolean extended_errors;
+    Boolean return_types;
 } db_state;
 
 typedef enum {
@@ -198,6 +199,7 @@ typedef enum {
 #define use_srollable_cursors(db_state) (db_state -> use_srollable_cursors)
 #define tuple_row(db_state) (db_state -> tuple_row)
 #define binary_strings(db_state) (db_state -> binary_strings)
+#define return_types(db_state) (db_state -> return_types)
 #define exists_more_result_sets(db_state) (db_state -> exists_more_result_sets)
 #define param_query(db_state) (db_state -> param_query)
 #define out_params(db_state) (db_state -> out_params)
