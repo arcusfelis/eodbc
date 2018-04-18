@@ -1548,14 +1548,14 @@ static void encode_column_dyn(db_column column, int column_nr,
                */
             char *bufferptr;
             /* in bytes */
-            int totallen;
+            int result_len;
 
             /* writes info into bufferptr and totallen
                allocates bufferptr */
-            retrive_long_data(column, column_nr, SQL_C_CHAR, state, &bufferptr, &totallen);
+            retrive_long_data(column, column_nr, SQL_C_CHAR, state, &bufferptr, &result_len);
 
 			if binary_strings(state) {
-				 ei_x_encode_binary(&dynamic_buffer(state), bufferptr, totallen);
+				 ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
 			} else {
 				ei_x_encode_string(&dynamic_buffer(state), bufferptr);
 			}
@@ -2698,7 +2698,7 @@ static void retrive_long_data(db_column column, int column_nr,
                      SQLSMALLINT TargetType,
 				     db_state *state,
                      char** bufferptr_out,
-                     int* totallen_out)
+                     int* result_len_out)
 { 
     char *bufferptr;
     char *outputptr;
@@ -2707,17 +2707,25 @@ static void retrive_long_data(db_column column, int column_nr,
     SQLLEN * StrLen_or_IndPtr;
 
     /* in bytes */
-    int totallen, blocklen, outputlen, result;
+    int totallen, blocklen, outputlen, result, fetched_bytes, result_len;
     diagnos diagnos;
 
-    blocklen = MAXCOLSIZE;
-    totallen = MAXCOLSIZE;
+    // blocklen contains one extra byte for a null terminator
+    blocklen = 5000;
+    totallen = blocklen;
     bufferptr = outputptr = (void*) safe_malloc(blocklen);
 
     result = SQLGetData(statement_handle(state),
             (SQLSMALLINT)(column_nr+1),
 			TargetType, outputptr,
 			blocklen, &StrLen_or_IndPtr);
+
+    // one byte is reserved for a null terminator
+    fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > blocklen))
+            ? (blocklen-1) : StrLen_or_IndPtr);
+    result_len = fetched_bytes;
+
+//  syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
 
     while (result == SQL_SUCCESS_WITH_INFO) {
 
@@ -2733,12 +2741,17 @@ static void retrive_long_data(db_column column, int column_nr,
 				(SQLSMALLINT)(column_nr+1), TargetType,
 				outputptr, blocklen,
 				&StrLen_or_IndPtr);
+        // one byte is reserved for a null terminator
+        fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > blocklen))
+                ? (blocklen-1) : StrLen_or_IndPtr);
+        result_len += fetched_bytes;
+//      syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
 	}
     }
   
     if (result == SQL_SUCCESS) {
         *bufferptr_out = bufferptr;
-        *totallen_out = totallen;
+        *result_len_out = result_len;
         return;
     } else {
 	DO_EXIT(EXIT_LONG_DATA); 
