@@ -840,7 +840,13 @@ connect(ConnectionReferense, ConnectionStr, Options) ->
 %%-------------------------------------------------------------------------
 odbc_send(Socket, Msg) -> %% Note currently all allowed messages are lists
     NewMsg = Msg ++ [?STR_TERMINATOR],
-    ok = gen_tcp:send(Socket, NewMsg),
+    case gen_tcp:send(Socket, NewMsg) of
+        ok -> ok;
+        {error, Reason} ->
+            erlang:error(#{event => odbc_send_failed,
+                           reason => Reason,
+                           msg => Msg})
+    end,
     ok = inet:setopts(Socket, [{active, once}]).
 
 %%--------------------------------------------------------------------------
