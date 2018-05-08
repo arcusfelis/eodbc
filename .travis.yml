@@ -1,0 +1,10 @@
+language: erlang
+branches:
+  only:
+    - master
+notifications:
+  email: arcusfelis@gmail.com
+otp_release:
+  - 18.3
+  - 19.3
+  - 20.0
