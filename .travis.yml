@@ -11,6 +11,7 @@ addons:
       - tdsodbc   # for mssql
 
 before_install:
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install docker docker-machine ; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install unixodbc ; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install freetds --with-unixodbc ; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install erlang ; fi

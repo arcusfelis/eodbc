@@ -5,6 +5,9 @@
 
 set -e
 
+if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then docker-machine create main ; fi
+if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then eval $(docker-machine env main) ; fi
+
 TOOLS=`dirname $0`
 
 
