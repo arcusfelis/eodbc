@@ -25,3 +25,4 @@ matrix:
       otp_release: 20.0
     - os: osx
       language: generic
+      script: ./rebar3 eunit
