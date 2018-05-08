@@ -4,13 +4,6 @@ branches:
     - master
 notifications:
   email: arcusfelis@gmail.com
-otp_release:
-  - 18.3
-  - 19.3
-  - 20.0
-os:
-  - linux
-  - osx
 addons:
   apt:
     packages:
@@ -20,3 +13,15 @@ addons:
 before_install:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install unixodbc ; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install freetds --with-unixodbc ; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install erlang ; fi
+
+matrix:
+  include:
+    - os: linux
+      otp_release: 18.3
+    - os: linux
+      otp_release: 19.3
+    - os: linux
+      otp_release: 20.0
+    - os: osx
+      language: generic
