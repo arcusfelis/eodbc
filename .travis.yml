@@ -8,3 +8,8 @@ otp_release:
   - 18.3
   - 19.3
   - 20.0
+addons:
+  apt:
+    packages:
+      - unixodbc  # for mssql
+      - tdsodbc   # for mssql
