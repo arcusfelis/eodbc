@@ -27,3 +27,6 @@ matrix:
     - os: osx
       language: generic
       script: ./rebar3 eunit
+
+services:
+    - docker
