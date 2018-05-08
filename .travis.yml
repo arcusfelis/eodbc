@@ -14,6 +14,7 @@ before_install:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install unixodbc ; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install freetds --with-unixodbc ; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install erlang ; fi
+  - time DB=mssql ./tools/travis-setup-db.sh
 
 matrix:
   include:
