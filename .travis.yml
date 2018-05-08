@@ -1,0 +1,28 @@
+language: erlang
+branches:
+  only:
+    - master
+notifications:
+  email: arcusfelis@gmail.com
+addons:
+  apt:
+    packages:
+      - unixodbc  # for mssql
+      - tdsodbc   # for mssql
+
+before_install:
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install unixodbc ; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install freetds --with-unixodbc ; fi
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install erlang ; fi
+
+matrix:
+  include:
+    - os: linux
+      otp_release: 18.3
+    - os: linux
+      otp_release: 19.3
+    - os: linux
+      otp_release: 20.0
+    - os: osx
+      language: generic
+      script: ./rebar3 eunit
