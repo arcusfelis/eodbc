@@ -2723,7 +2723,7 @@ static void retrive_long_data(db_column column, int column_nr,
     // one byte is reserved for a null terminator
     fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > blocklen))
             ? (blocklen-1) : StrLen_or_IndPtr);
-    result_len = fetched_bytes;
+    result_len = fetched_bytes - 1;
 
 //  syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
 
@@ -2736,7 +2736,7 @@ static void retrive_long_data(db_column column, int column_nr,
 	    totallen = outputlen + blocklen;
         // extend bufferptr buffer
 	    bufferptr = safe_realloc((void *) bufferptr, totallen);
-	    outputptr = bufferptr + outputlen;
+	    outputptr = bufferptr + outputlen - 1;
 	    result = SQLGetData(statement_handle(state),
 				(SQLSMALLINT)(column_nr+1), TargetType,
 				outputptr, blocklen,
