@@ -1545,11 +1545,11 @@ static void encode_column_dyn(db_column column, int column_nr,
             ei_x_encode_ulong(&dynamic_buffer(state), ts->second);
             break;
 	case SQL_C_CHAR:
-        syslog (LOG_INFO, "strlen_or_indptr=%d colsize=%d len=%d buffer=%p",
-                column.type.strlen_or_indptr,
-                column.type.col_size,
-                column.type.len,
-                column.buffer);
+//      syslog (LOG_INFO, "strlen_or_indptr=%d colsize=%d len=%d buffer=%p",
+//              column.type.strlen_or_indptr,
+//              column.type.col_size,
+//              column.type.len,
+//              column.buffer);
         if (column.type.strlen_or_indptr <= column.type.col_size)
         {
 			if binary_strings(state) {
@@ -2721,7 +2721,7 @@ static void retrive_long_data(db_column column, int column_nr,
                      char** bufferptr_out,
                      int* result_len_out)
 { 
-    syslog (LOG_INFO, "CALL retrive_long_data");
+//  syslog (LOG_INFO, "CALL retrive_long_data");
     char *bufferptr;
     char *outputptr;
     /* Nobody knows if StrLen_or_IndPtr works or not.
@@ -2768,41 +2768,41 @@ static void retrive_long_data(db_column column, int column_nr,
     // copy already extracted data from column.buffer to outputptr
     memcpy(outputptr, column.buffer, data_len);
 
-    syslog (LOG_INFO, "strlen_or_indptr=%d fetched_bytes=%d outputptr[fetched_bytes]=%d",
-            StrLen_or_IndPtr, fetched_bytes, outputptr[fetched_bytes]);
-    syslog (LOG_INFO, "outputptr[fetched_bytes-1]=%d",
-            outputptr[fetched_bytes-1]);
-    syslog (LOG_INFO, "outputptr[fetched_bytes-2]=%d",
-            outputptr[fetched_bytes-2]);
+//  syslog (LOG_INFO, "strlen_or_indptr=%d fetched_bytes=%d outputptr[fetched_bytes]=%d",
+//          StrLen_or_IndPtr, fetched_bytes, outputptr[fetched_bytes]);
+//  syslog (LOG_INFO, "outputptr[fetched_bytes-1]=%d",
+//          outputptr[fetched_bytes-1]);
+//  syslog (LOG_INFO, "outputptr[fetched_bytes-2]=%d",
+//          outputptr[fetched_bytes-2]);
 
     outputptr = outputptr + data_len;
 
     // result_len does not count the null terminator
     result_len = data_len;
 
-    if (!outputptr[-1])
-        syslog (LOG_INFO, "it's ok to have a null there. but can be unexpected null terminator");
+//  if (!outputptr[-1])
+//      syslog (LOG_INFO, "it's ok to have a null there. but can be unexpected null terminator");
 
 //  if (maybe_nullterm && column.buffer[data_len])
 //      syslog (LOG_INFO,
 //              "warning! column.buffer[data_len]=%d but null expected. data_len=%d column.type.strlen_or_indptr=%d",
 //              column.buffer[data_len], data_len, column.type.strlen_or_indptr);
 
-    StrLen_or_IndPtr = 0; // for debugging
-    outputptr[blocklen-1] = 0; // for debugging
-    syslog (LOG_INFO, "before outputptr[-1]=%d", outputptr[-1]);
-    syslog (LOG_INFO, "before outputptr[0]=%d", outputptr[0]);
-    syslog (LOG_INFO, "before outputptr[1]=%d", outputptr[1]);
-    syslog (LOG_INFO, "before outputptr[2]=%d", outputptr[2]);
+//  StrLen_or_IndPtr = 0; // for debugging
+//  outputptr[blocklen-1] = 0; // for debugging
+//  syslog (LOG_INFO, "before outputptr[-1]=%d", outputptr[-1]);
+//  syslog (LOG_INFO, "before outputptr[0]=%d", outputptr[0]);
+//  syslog (LOG_INFO, "before outputptr[1]=%d", outputptr[1]);
+//  syslog (LOG_INFO, "before outputptr[2]=%d", outputptr[2]);
     result = SQLGetData(statement_handle(state),
             (SQLSMALLINT)(column_nr+1),
 			TargetType, outputptr,
 			blocklen, &StrLen_or_IndPtr);
 
-    syslog (LOG_INFO, "outputptr[-1]=%d", outputptr[-1]);
-    syslog (LOG_INFO, "outputptr[0]=%d", outputptr[0]);
-    syslog (LOG_INFO, "outputptr[1]=%d", outputptr[1]);
-    syslog (LOG_INFO, "outputptr[2]=%d", outputptr[2]);
+//  syslog (LOG_INFO, "outputptr[-1]=%d", outputptr[-1]);
+//  syslog (LOG_INFO, "outputptr[0]=%d", outputptr[0]);
+//  syslog (LOG_INFO, "outputptr[1]=%d", outputptr[1]);
+//  syslog (LOG_INFO, "outputptr[2]=%d", outputptr[2]);
 
     // terminator is not counted if present
     // ACTUALLY, there are two nulls possible in some cases (i.e. when buffer
@@ -2810,23 +2810,23 @@ static void retrive_long_data(db_column column, int column_nr,
     fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > blocklen))
             ? (blocklen-maybe_nullterm) : StrLen_or_IndPtr);
 
-    syslog (LOG_INFO, "strlen_or_indptr=%d fetched_bytes=%d outputptr[fetched_bytes]=%d after getdata",
-            StrLen_or_IndPtr, fetched_bytes, outputptr[fetched_bytes]);
-    syslog (LOG_INFO, "outputptr[fetched_bytes-1]=%d after getdata",
-            outputptr[fetched_bytes-1]);
-    syslog (LOG_INFO, "outputptr[fetched_bytes-2]=%d after getdata",
-            outputptr[fetched_bytes-2]);
+//  syslog (LOG_INFO, "strlen_or_indptr=%d fetched_bytes=%d outputptr[fetched_bytes]=%d after getdata",
+//          StrLen_or_IndPtr, fetched_bytes, outputptr[fetched_bytes]);
+//  syslog (LOG_INFO, "outputptr[fetched_bytes-1]=%d after getdata",
+//          outputptr[fetched_bytes-1]);
+//  syslog (LOG_INFO, "outputptr[fetched_bytes-2]=%d after getdata",
+//          outputptr[fetched_bytes-2]);
 
 
     result_len = result_len + fetched_bytes;
-    syslog (LOG_INFO, "blocklen=%d fetched_bytes=%d outputptr[blocklen-1]=%d",
-            blocklen, fetched_bytes, outputptr[blocklen-1]);
+//  syslog (LOG_INFO, "blocklen=%d fetched_bytes=%d outputptr[blocklen-1]=%d",
+//          blocklen, fetched_bytes, outputptr[blocklen-1]);
 
-    if (outputptr[blocklen-1] && maybe_nullterm)
-        syslog (LOG_INFO, "warning! outputptr[blocklen]=%d but null expected",
-                outputptr[blocklen]);
+//  if (outputptr[blocklen-1] && maybe_nullterm)
+//      syslog (LOG_INFO, "warning! outputptr[blocklen]=%d but null expected",
+//              outputptr[blocklen]);
 
-    syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
+//  syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
 
     int i = 0;
     while (result == SQL_SUCCESS_WITH_INFO) {
@@ -2839,10 +2839,10 @@ static void retrive_long_data(db_column column, int column_nr,
         // extend bufferptr buffer
         bufferptr = safe_realloc((void *) bufferptr, totallen);
         outputptr = bufferptr + result_len;
-        syslog (LOG_INFO, "setting outputptr result_len=%d after fetched_bytes=%d i=%d", result_len, fetched_bytes, i);
-        if (!outputptr[-1])
-            syslog (LOG_INFO, "it's ok to have a null there. but can be unexpected null terminator (in cycle)");
-        outputptr[blocklen-1] = 0; // for debugging
+//      syslog (LOG_INFO, "setting outputptr result_len=%d after fetched_bytes=%d i=%d", result_len, fetched_bytes, i);
+//      if (!outputptr[-1])
+//          syslog (LOG_INFO, "it's ok to have a null there. but can be unexpected null terminator (in cycle)");
+//      outputptr[blocklen-1] = 0; // for debugging
         result = SQLGetData(statement_handle(state),
                 (SQLSMALLINT)(column_nr+1), TargetType,
                 outputptr, blocklen,
@@ -2850,18 +2850,18 @@ static void retrive_long_data(db_column column, int column_nr,
         // one byte is reserved for a null terminator
         fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > (blocklen-maybe_nullterm)))
                 ? (blocklen-maybe_nullterm) : StrLen_or_IndPtr);
-        if (outputptr[blocklen-1] && maybe_nullterm)
-            syslog (LOG_INFO, "warning! outputptr[blocklen]=%d but null expected",
-                    outputptr[blocklen]);
-        syslog (LOG_INFO, "result_len=%d + fetched_bytes=%d",
-                result_len, fetched_bytes);
+//      if (outputptr[blocklen-1] && maybe_nullterm)
+//          syslog (LOG_INFO, "warning! outputptr[blocklen]=%d but null expected",
+//                  outputptr[blocklen]);
+//      syslog (LOG_INFO, "result_len=%d + fetched_bytes=%d",
+//              result_len, fetched_bytes);
         result_len = result_len + fetched_bytes;
 //      syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
     }
     i++;
     }
     if (result == SQL_SUCCESS) {
-        syslog (LOG_INFO, "RETURN retrive_long_data");
+//      syslog (LOG_INFO, "RETURN retrive_long_data");
         *bufferptr_out = bufferptr;
         *result_len_out = result_len;
         return;
