@@ -2730,10 +2730,12 @@ static void retrive_long_data(db_column column, int column_nr,
     // null-termination character when returning character data to
     // *TargetValuePtr. *TargetValuePtr must therefore contain space for the
     // null-termination character, or the driver will truncate the data.
-    if (column.type.sql == SQL_CHAR
-        || column.type.sql == SQL_VARCHAR
-        || column.type.sql == SQL_LONGVARCHAR)
-        maybe_nullterm = 1;
+//  if (column.type.sql == SQL_CHAR
+//      || column.type.sql == SQL_VARCHAR
+//      || column.type.sql == SQL_LONGVARCHAR)
+//      maybe_nullterm = 1;
+    // But it looks that ODBC likes to insert the null terminators all the time
+    maybe_nullterm = 1;
 
     // column.type.col_size bytes of data are already in column.buffer.
 
