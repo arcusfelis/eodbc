@@ -1316,6 +1316,7 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
     ei_x_encode_list_header(&dynamic_buffer(state), num_of_columns);
   
     for (i = 0; i < num_of_columns; ++i) {
+    columns(state)[i].buffer = NULL;
 
 	if(!sql_success(SQLDescribeCol(statement_handle(state),
 				       (SQLSMALLINT)(i+1),
@@ -1326,6 +1327,13 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
 
 	if(sql_type == SQL_LONGVARCHAR || sql_type == SQL_LONGVARBINARY || sql_type == SQL_WLONGVARCHAR)
 	    size = MAXCOLSIZE;
+
+    // because otherwise SQLBindCol does not put data from VARCHAR(max)
+    // VARCHAR(max) has size=1073741823
+    if (size > MAXCOLSIZE)
+    {
+        size = MAXCOLSIZE;
+    }
     
 	(columns(state)[i]).type.decimal_digits = dec_digits;
 	(columns(state)[i]).type.sql = sql_type;
@@ -1507,8 +1515,6 @@ static db_result_msg encode_row_count(SQLINTEGER num_of_rows,
 static void encode_column_dyn(db_column column, int column_nr,
 			      db_state *state)
 {
-    SQLRETURN result;
-
     TIMESTAMP_STRUCT* ts;
     if (column.type.len == 0 ||
 	column.type.strlen_or_indptr == SQL_NULL_DATA) {
@@ -1528,9 +1534,11 @@ static void encode_column_dyn(db_column column, int column_nr,
             ei_x_encode_ulong(&dynamic_buffer(state), ts->second);
             break;
 	case SQL_C_CHAR:
-//      syslog (LOG_INFO, "strlen_or_indptr=%d colsize=%d",
+//      syslog (LOG_INFO, "strlen_or_indptr=%d colsize=%d len=%d buffer=%p",
 //              column.type.strlen_or_indptr,
-//              column.type.col_size);
+//              column.type.col_size,
+//              column.type.len,
+//              column.buffer);
         if (column.type.strlen_or_indptr <= column.type.col_size)
         {
 			if binary_strings(state) {
@@ -1540,11 +1548,13 @@ static void encode_column_dyn(db_column column, int column_nr,
 				ei_x_encode_string(&dynamic_buffer(state), column.buffer);
 			}
         } else {
-            /* oops, the result value is too long.
+            /* Let's assume that result length is unknown.
                extract part by part.
                handles https://bugs.erlang.org/browse/ERL-421
 
                ODBC truncates data for LONGTEXT and BLOB
+
+               column.type.col_size bytes of data are already in column.buffer.
                */
             char *bufferptr;
             /* in bytes */
@@ -2707,13 +2717,21 @@ static void retrive_long_data(db_column column, int column_nr,
     SQLLEN * StrLen_or_IndPtr;
 
     /* in bytes */
-    int totallen, blocklen, outputlen, result, fetched_bytes, result_len;
+    int totallen, blocklen, result, fetched_bytes, result_len;
     diagnos diagnos;
+
+    // column.type.col_size bytes of data are already in column.buffer.
 
     // blocklen contains one extra byte for a null terminator
     blocklen = 5000;
-    totallen = blocklen;
-    bufferptr = outputptr = (void*) safe_malloc(blocklen);
+    totallen = blocklen + column.type.col_size;
+    // allocate space for already extracted data + a new block of data
+    bufferptr = outputptr = (void*) safe_malloc(totallen);
+
+    // copy already extracted data from column.buffer to outputptr
+    memcpy(outputptr, column.buffer, column.type.col_size);
+    outputptr = outputptr + column.type.col_size;
+    result_len = column.type.col_size;
 
     result = SQLGetData(statement_handle(state),
             (SQLSMALLINT)(column_nr+1),
@@ -2723,32 +2741,31 @@ static void retrive_long_data(db_column column, int column_nr,
     // one byte is reserved for a null terminator
     fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > blocklen))
             ? (blocklen-1) : StrLen_or_IndPtr);
-    result_len = fetched_bytes - 1;
+    result_len = result_len + fetched_bytes - 1;
 
 //  syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
 
     while (result == SQL_SUCCESS_WITH_INFO) {
 
-	diagnos = get_diagnos(SQL_HANDLE_STMT, statement_handle(state), extended_errors(state));
+    diagnos = get_diagnos(SQL_HANDLE_STMT, statement_handle(state), extended_errors(state));
     
-	if(strcmp((char *)diagnos.sqlState, TRUNCATED) == 0) {
-	    outputlen = totallen - 1;
-	    totallen = outputlen + blocklen;
+    if(strcmp((char *)diagnos.sqlState, TRUNCATED) == 0) {
+        totallen = result_len + blocklen;
         // extend bufferptr buffer
-	    bufferptr = safe_realloc((void *) bufferptr, totallen);
-	    outputptr = bufferptr + outputlen - 1;
-	    result = SQLGetData(statement_handle(state),
-				(SQLSMALLINT)(column_nr+1), TargetType,
-				outputptr, blocklen,
-				&StrLen_or_IndPtr);
+        bufferptr = safe_realloc((void *) bufferptr, totallen);
+        outputptr = bufferptr + result_len;
+        result = SQLGetData(statement_handle(state),
+                (SQLSMALLINT)(column_nr+1), TargetType,
+                outputptr, blocklen,
+                &StrLen_or_IndPtr);
         // one byte is reserved for a null terminator
         fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > blocklen))
                 ? (blocklen-1) : StrLen_or_IndPtr);
         result_len += fetched_bytes;
 //      syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
-	}
     }
-  
+    }
+  result = SQL_SUCCESS;
     if (result == SQL_SUCCESS) {
         *bufferptr_out = bufferptr;
         *result_len_out = result_len;
