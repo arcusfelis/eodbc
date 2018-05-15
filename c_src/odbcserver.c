@@ -2717,8 +2717,21 @@ static void retrive_long_data(db_column column, int column_nr,
     SQLLEN * StrLen_or_IndPtr;
 
     /* in bytes */
-    int totallen, blocklen, result, fetched_bytes, result_len;
+    int totallen, blocklen, result, fetched_bytes, result_len, data_len;
     diagnos diagnos;
+
+    int maybe_nullterm = 0;
+
+    // The driver uses BufferLength to avoid writing past the end of the
+    // *TargetValuePtr buffer when returning variable-length data, such as
+    // character or binary data. Note that the driver counts the
+    // null-termination character when returning character data to
+    // *TargetValuePtr. *TargetValuePtr must therefore contain space for the
+    // null-termination character, or the driver will truncate the data.
+    if (column.type.sql == SQL_CHAR
+        || column.type.sql == SQL_VARCHAR
+        || column.type.sql == SQL_LONGVARCHAR)
+        maybe_nullterm = 1;
 
     // column.type.col_size bytes of data are already in column.buffer.
 
@@ -2728,20 +2741,24 @@ static void retrive_long_data(db_column column, int column_nr,
     // allocate space for already extracted data + a new block of data
     bufferptr = outputptr = (void*) safe_malloc(totallen);
 
+    // Ignore null terminator if present
+    data_len = column.type.col_size - maybe_nullterm;
+
     // copy already extracted data from column.buffer to outputptr
-    memcpy(outputptr, column.buffer, column.type.col_size);
-    outputptr = outputptr + column.type.col_size;
-    result_len = column.type.col_size;
+    memcpy(outputptr, column.buffer, data_len);
+    outputptr = outputptr + data_len;
+    // result_len does not count the null terminator
+    result_len = data_len;
 
     result = SQLGetData(statement_handle(state),
             (SQLSMALLINT)(column_nr+1),
 			TargetType, outputptr,
 			blocklen, &StrLen_or_IndPtr);
 
-    // one byte is reserved for a null terminator
+    // terminator is not counted if present
     fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > blocklen))
-            ? (blocklen-1) : StrLen_or_IndPtr);
-    result_len = result_len + fetched_bytes - 1;
+            ? (blocklen-maybe_nullterm) : StrLen_or_IndPtr);
+    result_len = result_len + fetched_bytes;
 
 //  syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
 
@@ -2750,6 +2767,7 @@ static void retrive_long_data(db_column column, int column_nr,
     diagnos = get_diagnos(SQL_HANDLE_STMT, statement_handle(state), extended_errors(state));
     
     if(strcmp((char *)diagnos.sqlState, TRUNCATED) == 0) {
+        // totallen counts null terminator if present
         totallen = result_len + blocklen;
         // extend bufferptr buffer
         bufferptr = safe_realloc((void *) bufferptr, totallen);
@@ -2760,8 +2778,8 @@ static void retrive_long_data(db_column column, int column_nr,
                 &StrLen_or_IndPtr);
         // one byte is reserved for a null terminator
         fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > blocklen))
-                ? (blocklen-1) : StrLen_or_IndPtr);
-        result_len += fetched_bytes - 1;
+                ? (blocklen-maybe_nullterm) : StrLen_or_IndPtr);
+        result_len += fetched_bytes;
 //      syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
     }
     }
