@@ -1330,7 +1330,9 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
 
     // because otherwise SQLBindCol does not put data from VARCHAR(max)
     // VARCHAR(max) has size=1073741823
-    if (size > MAXCOLSIZE)
+    //
+    // we don't want to apply it for unicode
+    if ((sql_type == SQL_BINARY || sql_type == SQL_VARBINARY) && size > MAXCOLSIZE)
     {
         size = MAXCOLSIZE;
     }
@@ -1534,11 +1536,11 @@ static void encode_column_dyn(db_column column, int column_nr,
             ei_x_encode_ulong(&dynamic_buffer(state), ts->second);
             break;
 	case SQL_C_CHAR:
-//      syslog (LOG_INFO, "strlen_or_indptr=%d colsize=%d len=%d buffer=%p",
-//              column.type.strlen_or_indptr,
-//              column.type.col_size,
-//              column.type.len,
-//              column.buffer);
+        syslog (LOG_INFO, "strlen_or_indptr=%d colsize=%d len=%d buffer=%p",
+                column.type.strlen_or_indptr,
+                column.type.col_size,
+                column.type.len,
+                column.buffer);
         if (column.type.strlen_or_indptr <= column.type.col_size)
         {
 			if binary_strings(state) {
@@ -2760,7 +2762,7 @@ static void retrive_long_data(db_column column, int column_nr,
             ? (blocklen-maybe_nullterm) : StrLen_or_IndPtr);
     result_len = result_len + fetched_bytes;
 
-//  syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
+    syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
 
     while (result == SQL_SUCCESS_WITH_INFO) {
 
@@ -2783,7 +2785,6 @@ static void retrive_long_data(db_column column, int column_nr,
 //      syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
     }
     }
-  result = SQL_SUCCESS;
     if (result == SQL_SUCCESS) {
         *bufferptr_out = bufferptr;
         *result_len_out = result_len;
