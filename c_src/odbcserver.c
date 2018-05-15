@@ -1336,6 +1336,15 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
     {
         size = MAXCOLSIZE;
     }
+
+    // odbc does not like even buffers: i.e. 8000, 10000.
+    // correct to 8001, 10001 to fit null terminator.
+    // without it binaries encoded as HEX can loose one byte.
+    // i.e. "0500505" instead of "05050505".
+    if (sql_type == SQL_BINARY || sql_type == SQL_VARBINARY ||
+        sql_type == SQL_LONGVARCHAR || sql_type == SQL_LONGVARBINARY || sql_type == SQL_WLONGVARCHAR)
+        if (size % 2 == 0)
+            size++;
     
 	(columns(state)[i]).type.decimal_digits = dec_digits;
 	(columns(state)[i]).type.sql = sql_type;
@@ -2745,6 +2754,7 @@ static void retrive_long_data(db_column column, int column_nr,
     totallen = blocklen + column.type.col_size + 1;
     // allocate space for already extracted data + a new block of data
     bufferptr = outputptr = (void*) safe_malloc(totallen);
+    for (int i = 0; i < totallen; i++) bufferptr[i] = 0; // debug
 
     // Ignore null terminator if present
     data_len = column.type.col_size - maybe_nullterm;
@@ -2752,7 +2762,7 @@ static void retrive_long_data(db_column column, int column_nr,
 
     StrLen_or_IndPtr = column.type.strlen_or_indptr;
     fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > column.type.col_size))
-            ? (column.type.col_size - maybe_nullterm) : StrLen_or_IndPtr);
+            ? (column.type.col_size-maybe_nullterm) : StrLen_or_IndPtr);
     data_len = fetched_bytes;
 
     // copy already extracted data from column.buffer to outputptr
@@ -2780,11 +2790,16 @@ static void retrive_long_data(db_column column, int column_nr,
 
     StrLen_or_IndPtr = 0; // for debugging
     outputptr[blocklen-1] = 0; // for debugging
+    syslog (LOG_INFO, "before outputptr[-1]=%d", outputptr[-1]);
+    syslog (LOG_INFO, "before outputptr[0]=%d", outputptr[0]);
+    syslog (LOG_INFO, "before outputptr[1]=%d", outputptr[1]);
+    syslog (LOG_INFO, "before outputptr[2]=%d", outputptr[2]);
     result = SQLGetData(statement_handle(state),
             (SQLSMALLINT)(column_nr+1),
 			TargetType, outputptr,
 			blocklen, &StrLen_or_IndPtr);
 
+    syslog (LOG_INFO, "outputptr[-1]=%d", outputptr[-1]);
     syslog (LOG_INFO, "outputptr[0]=%d", outputptr[0]);
     syslog (LOG_INFO, "outputptr[1]=%d", outputptr[1]);
     syslog (LOG_INFO, "outputptr[2]=%d", outputptr[2]);
