@@ -2754,7 +2754,8 @@ static void retrive_long_data(db_column column, int column_nr,
     totallen = blocklen + column.type.col_size + 1;
     // allocate space for already extracted data + a new block of data
     bufferptr = outputptr = (void*) safe_malloc(totallen);
-    for (int i = 0; i < totallen; i++) bufferptr[i] = 0; // debug
+    // reset buffer for simple debugging
+//  for (int i = 0; i < totallen; i++) bufferptr[i] = 0; // debug
 
     // Ignore null terminator if present
     data_len = column.type.col_size - maybe_nullterm;
