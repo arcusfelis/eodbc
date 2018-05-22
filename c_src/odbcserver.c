@@ -1316,6 +1316,7 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
     ei_x_encode_list_header(&dynamic_buffer(state), num_of_columns);
   
     for (i = 0; i < num_of_columns; ++i) {
+    columns(state)[i].buffer = NULL;
 
 	if(!sql_success(SQLDescribeCol(statement_handle(state),
 				       (SQLSMALLINT)(i+1),
@@ -1326,6 +1327,24 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
 
 	if(sql_type == SQL_LONGVARCHAR || sql_type == SQL_LONGVARBINARY || sql_type == SQL_WLONGVARCHAR)
 	    size = MAXCOLSIZE;
+
+    // because otherwise SQLBindCol does not put data from VARCHAR(max)
+    // VARCHAR(max) has size=1073741823
+    //
+    // we don't want to apply it for unicode
+    if ((sql_type == SQL_BINARY || sql_type == SQL_VARBINARY) && size > MAXCOLSIZE)
+    {
+        size = MAXCOLSIZE;
+    }
+
+    // odbc does not like even buffers: i.e. 8000, 10000.
+    // correct to 8001, 10001 to fit null terminator.
+    // without it binaries encoded as HEX can loose one byte.
+    // i.e. "0500505" instead of "05050505".
+    if (sql_type == SQL_BINARY || sql_type == SQL_VARBINARY ||
+        sql_type == SQL_LONGVARCHAR || sql_type == SQL_LONGVARBINARY || sql_type == SQL_WLONGVARCHAR)
+        if (size % 2 == 0)
+            size++;
     
 	(columns(state)[i]).type.decimal_digits = dec_digits;
 	(columns(state)[i]).type.sql = sql_type;
@@ -1507,8 +1526,6 @@ static db_result_msg encode_row_count(SQLINTEGER num_of_rows,
 static void encode_column_dyn(db_column column, int column_nr,
 			      db_state *state)
 {
-    SQLRETURN result;
-
     TIMESTAMP_STRUCT* ts;
     if (column.type.len == 0 ||
 	column.type.strlen_or_indptr == SQL_NULL_DATA) {
@@ -1528,9 +1545,11 @@ static void encode_column_dyn(db_column column, int column_nr,
             ei_x_encode_ulong(&dynamic_buffer(state), ts->second);
             break;
 	case SQL_C_CHAR:
-//      syslog (LOG_INFO, "strlen_or_indptr=%d colsize=%d",
+//      syslog (LOG_INFO, "strlen_or_indptr=%d colsize=%d len=%d buffer=%p",
 //              column.type.strlen_or_indptr,
-//              column.type.col_size);
+//              column.type.col_size,
+//              column.type.len,
+//              column.buffer);
         if (column.type.strlen_or_indptr <= column.type.col_size)
         {
 			if binary_strings(state) {
@@ -1540,11 +1559,13 @@ static void encode_column_dyn(db_column column, int column_nr,
 				ei_x_encode_string(&dynamic_buffer(state), column.buffer);
 			}
         } else {
-            /* oops, the result value is too long.
+            /* Let's assume that result length is unknown.
                extract part by part.
                handles https://bugs.erlang.org/browse/ERL-421
 
                ODBC truncates data for LONGTEXT and BLOB
+
+               column.type.col_size bytes of data are already in column.buffer.
                */
             char *bufferptr;
             /* in bytes */
@@ -2700,6 +2721,7 @@ static void retrive_long_data(db_column column, int column_nr,
                      char** bufferptr_out,
                      int* result_len_out)
 { 
+//  syslog (LOG_INFO, "CALL retrive_long_data");
     char *bufferptr;
     char *outputptr;
     /* Nobody knows if StrLen_or_IndPtr works or not.
@@ -2707,49 +2729,140 @@ static void retrive_long_data(db_column column, int column_nr,
     SQLLEN * StrLen_or_IndPtr;
 
     /* in bytes */
-    int totallen, blocklen, outputlen, result, fetched_bytes, result_len;
+    int totallen, blocklen, result, fetched_bytes, result_len, data_len;
     diagnos diagnos;
 
-    // blocklen contains one extra byte for a null terminator
-    blocklen = 5000;
-    totallen = blocklen;
-    bufferptr = outputptr = (void*) safe_malloc(blocklen);
+    int maybe_nullterm = 0;
 
+    // The driver uses BufferLength to avoid writing past the end of the
+    // *TargetValuePtr buffer when returning variable-length data, such as
+    // character or binary data. Note that the driver counts the
+    // null-termination character when returning character data to
+    // *TargetValuePtr. *TargetValuePtr must therefore contain space for the
+    // null-termination character, or the driver will truncate the data.
+//  if (column.type.sql == SQL_CHAR
+//      || column.type.sql == SQL_VARCHAR
+//      || column.type.sql == SQL_LONGVARCHAR)
+//      maybe_nullterm = 1;
+    // But it looks that ODBC likes to insert the null terminators all the time
+    maybe_nullterm = 1;
+
+    // column.type.col_size bytes of data are already in column.buffer.
+
+    // blocklen contains one extra byte for a null terminator
+    blocklen = 5000 + maybe_nullterm;
+    totallen = blocklen + column.type.col_size + 1;
+    // allocate space for already extracted data + a new block of data
+    bufferptr = outputptr = (void*) safe_malloc(totallen);
+    // reset buffer for simple debugging
+//  for (int i = 0; i < totallen; i++) bufferptr[i] = 0; // debug
+
+    // Ignore null terminator if present
+    data_len = column.type.col_size - maybe_nullterm;
+//  data_len = column.type.col_size;
+
+    StrLen_or_IndPtr = column.type.strlen_or_indptr;
+    fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > column.type.col_size))
+            ? (column.type.col_size-maybe_nullterm) : StrLen_or_IndPtr);
+    data_len = fetched_bytes;
+
+    // copy already extracted data from column.buffer to outputptr
+    memcpy(outputptr, column.buffer, data_len);
+
+//  syslog (LOG_INFO, "strlen_or_indptr=%d fetched_bytes=%d outputptr[fetched_bytes]=%d",
+//          StrLen_or_IndPtr, fetched_bytes, outputptr[fetched_bytes]);
+//  syslog (LOG_INFO, "outputptr[fetched_bytes-1]=%d",
+//          outputptr[fetched_bytes-1]);
+//  syslog (LOG_INFO, "outputptr[fetched_bytes-2]=%d",
+//          outputptr[fetched_bytes-2]);
+
+    outputptr = outputptr + data_len;
+
+    // result_len does not count the null terminator
+    result_len = data_len;
+
+//  if (!outputptr[-1])
+//      syslog (LOG_INFO, "it's ok to have a null there. but can be unexpected null terminator");
+
+//  if (maybe_nullterm && column.buffer[data_len])
+//      syslog (LOG_INFO,
+//              "warning! column.buffer[data_len]=%d but null expected. data_len=%d column.type.strlen_or_indptr=%d",
+//              column.buffer[data_len], data_len, column.type.strlen_or_indptr);
+
+//  StrLen_or_IndPtr = 0; // for debugging
+//  outputptr[blocklen-1] = 0; // for debugging
+//  syslog (LOG_INFO, "before outputptr[-1]=%d", outputptr[-1]);
+//  syslog (LOG_INFO, "before outputptr[0]=%d", outputptr[0]);
+//  syslog (LOG_INFO, "before outputptr[1]=%d", outputptr[1]);
+//  syslog (LOG_INFO, "before outputptr[2]=%d", outputptr[2]);
     result = SQLGetData(statement_handle(state),
             (SQLSMALLINT)(column_nr+1),
 			TargetType, outputptr,
 			blocklen, &StrLen_or_IndPtr);
 
-    // one byte is reserved for a null terminator
+//  syslog (LOG_INFO, "outputptr[-1]=%d", outputptr[-1]);
+//  syslog (LOG_INFO, "outputptr[0]=%d", outputptr[0]);
+//  syslog (LOG_INFO, "outputptr[1]=%d", outputptr[1]);
+//  syslog (LOG_INFO, "outputptr[2]=%d", outputptr[2]);
+
+    // terminator is not counted if present
+    // ACTUALLY, there are two nulls possible in some cases (i.e. when buffer
+    // is 5000, not 5001)
     fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > blocklen))
-            ? (blocklen-1) : StrLen_or_IndPtr);
-    result_len = fetched_bytes;
+            ? (blocklen-maybe_nullterm) : StrLen_or_IndPtr);
+
+//  syslog (LOG_INFO, "strlen_or_indptr=%d fetched_bytes=%d outputptr[fetched_bytes]=%d after getdata",
+//          StrLen_or_IndPtr, fetched_bytes, outputptr[fetched_bytes]);
+//  syslog (LOG_INFO, "outputptr[fetched_bytes-1]=%d after getdata",
+//          outputptr[fetched_bytes-1]);
+//  syslog (LOG_INFO, "outputptr[fetched_bytes-2]=%d after getdata",
+//          outputptr[fetched_bytes-2]);
+
+
+    result_len = result_len + fetched_bytes;
+//  syslog (LOG_INFO, "blocklen=%d fetched_bytes=%d outputptr[blocklen-1]=%d",
+//          blocklen, fetched_bytes, outputptr[blocklen-1]);
+
+//  if (outputptr[blocklen-1] && maybe_nullterm)
+//      syslog (LOG_INFO, "warning! outputptr[blocklen]=%d but null expected",
+//              outputptr[blocklen]);
 
 //  syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
 
+    int i = 0;
     while (result == SQL_SUCCESS_WITH_INFO) {
 
-	diagnos = get_diagnos(SQL_HANDLE_STMT, statement_handle(state), extended_errors(state));
+    diagnos = get_diagnos(SQL_HANDLE_STMT, statement_handle(state), extended_errors(state));
     
-	if(strcmp((char *)diagnos.sqlState, TRUNCATED) == 0) {
-	    outputlen = totallen - 1;
-	    totallen = outputlen + blocklen;
+    if(strcmp((char *)diagnos.sqlState, TRUNCATED) == 0) {
+        // totallen counts null terminator if present
+        totallen = result_len + blocklen;
         // extend bufferptr buffer
-	    bufferptr = safe_realloc((void *) bufferptr, totallen);
-	    outputptr = bufferptr + outputlen;
-	    result = SQLGetData(statement_handle(state),
-				(SQLSMALLINT)(column_nr+1), TargetType,
-				outputptr, blocklen,
-				&StrLen_or_IndPtr);
+        bufferptr = safe_realloc((void *) bufferptr, totallen);
+        outputptr = bufferptr + result_len;
+//      syslog (LOG_INFO, "setting outputptr result_len=%d after fetched_bytes=%d i=%d", result_len, fetched_bytes, i);
+//      if (!outputptr[-1])
+//          syslog (LOG_INFO, "it's ok to have a null there. but can be unexpected null terminator (in cycle)");
+//      outputptr[blocklen-1] = 0; // for debugging
+        result = SQLGetData(statement_handle(state),
+                (SQLSMALLINT)(column_nr+1), TargetType,
+                outputptr, blocklen,
+                &StrLen_or_IndPtr);
         // one byte is reserved for a null terminator
-        fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > blocklen))
-                ? (blocklen-1) : StrLen_or_IndPtr);
-        result_len += fetched_bytes;
+        fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > (blocklen-maybe_nullterm)))
+                ? (blocklen-maybe_nullterm) : StrLen_or_IndPtr);
+//      if (outputptr[blocklen-1] && maybe_nullterm)
+//          syslog (LOG_INFO, "warning! outputptr[blocklen]=%d but null expected",
+//                  outputptr[blocklen]);
+//      syslog (LOG_INFO, "result_len=%d + fetched_bytes=%d",
+//              result_len, fetched_bytes);
+        result_len = result_len + fetched_bytes;
 //      syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
-	}
     }
-  
+    i++;
+    }
     if (result == SQL_SUCCESS) {
+//      syslog (LOG_INFO, "RETURN retrive_long_data");
         *bufferptr_out = bufferptr;
         *result_len_out = result_len;
         return;
