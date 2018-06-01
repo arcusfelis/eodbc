@@ -9,11 +9,16 @@ addons:
     packages:
       - unixodbc  # for mssql
       - tdsodbc   # for mssql
+services:
+    - docker
+
+script: ./rebar3 eunit
 
 before_install:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install unixodbc ; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install freetds --with-unixodbc ; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install erlang ; fi
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then DB=mssql ./tools/travis-setup-db.sh ; fi
 
 matrix:
   include:
@@ -25,4 +30,4 @@ matrix:
       otp_release: 20.0
     - os: osx
       language: generic
-      script: ./rebar3 eunit
+      script: ./rebar3 compile # Check that it at least compiles
