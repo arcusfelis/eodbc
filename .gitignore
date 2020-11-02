@@ -2,3 +2,6 @@ ebin
 c_src/*.o
 c_src/*.d
 priv/eodbcserver
+_build
+.*.sw*
+.rebar3

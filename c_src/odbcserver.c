@@ -243,13 +243,20 @@ static param_array * bind_parameter_arrays(byte *buffer, int *index,
 static void * retrive_param_values(param_array *Param);
 
 static db_column retrive_binary_data(db_column column, int column_nr,
-				     db_state *state);
+                     int* result_len, db_state *state);
 
 static void retrive_long_data(db_column column, int column_nr,
                      SQLSMALLINT TargetType,
 				     db_state *state,
                      char** bufferptr_out,
                      int* totallen_out);
+
+static void retrive_wide_string_data(
+        db_column column,
+        int column_nr,
+        char** result_buf,
+        int* result_len,
+        db_state* state);
 
 static db_result_msg retrive_scrollable_cursor_support_info(db_state
 							    *state);
@@ -1342,6 +1349,7 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
     // without it binaries encoded as HEX can loose one byte.
     // i.e. "0500505" instead of "05050505".
     if (sql_type == SQL_BINARY || sql_type == SQL_VARBINARY ||
+        sql_type == SQL_C_WCHAR ||
         sql_type == SQL_LONGVARCHAR || sql_type == SQL_LONGVARBINARY || sql_type == SQL_WLONGVARCHAR)
         if (size % 2 == 0)
             size++;
@@ -1358,6 +1366,9 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
 		columns(state)[i].buffer =
 		    (char *)safe_malloc(columns(state)[i].type.len);
 	
+		if (columns(state)[i].type.c == SQL_C_WCHAR) {
+		    /* retrived later by retrive_binary_data */
+        } else
 		if (columns(state)[i].type.c == SQL_C_BINARY) {
 		    /* retrived later by retrive_binary_data */
 		} else {
@@ -1527,6 +1538,7 @@ static void encode_column_dyn(db_column column, int column_nr,
 			      db_state *state)
 {
     TIMESTAMP_STRUCT* ts;
+    int result_len = 0;
     if (column.type.len == 0 ||
 	column.type.strlen_or_indptr == SQL_NULL_DATA) {
 	ei_x_encode_atom(&dynamic_buffer(state), "null");
@@ -1553,7 +1565,7 @@ static void encode_column_dyn(db_column column, int column_nr,
         if (column.type.strlen_or_indptr <= column.type.col_size)
         {
 			if binary_strings(state) {
-				 ei_x_encode_binary(&dynamic_buffer(state), 
+				 ei_x_encode_binary(&dynamic_buffer(state),
 						    column.buffer,column.type.strlen_or_indptr);
 			} else {
 				ei_x_encode_string(&dynamic_buffer(state), column.buffer);
@@ -1584,10 +1596,18 @@ static void encode_column_dyn(db_column column, int column_nr,
             free(bufferptr);
         }
 	    break;
-	case SQL_C_WCHAR:
-            ei_x_encode_binary(&dynamic_buffer(state), 
-                               column.buffer,column.type.strlen_or_indptr);
-	    break;
+
+	case SQL_C_WCHAR: {
+        // Read chunks of data.
+        // There is pretty high change to get <<0,0,0...>> as a column data on some systems otherwise
+        // https://docs.microsoft.com/en-us/sql/relational-databases/native-client/features/odbc-driver-behavior-change-when-handling-character-conversions?view=sql-server-ver15
+        char *bufferptr = 0;
+        int result_len = 0; /* in bytes */
+        retrive_wide_string_data(column, column_nr, &bufferptr, &result_len, state);
+        ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
+        free(bufferptr);
+	    break; }
+
 	case SQL_C_SLONG:
 	    ei_x_encode_long(&dynamic_buffer(state),
 	    	*(SQLINTEGER*)column.buffer);
@@ -1601,7 +1621,7 @@ static void encode_column_dyn(db_column column, int column_nr,
 			     column.buffer[0]?"true":"false");
 	    break;
 	case SQL_C_BINARY:		
-	    column = retrive_binary_data(column, column_nr, state);
+	    column = retrive_binary_data(column, column_nr, &result_len, state);
 	    if binary_strings(state) {
 		    ei_x_encode_binary(&dynamic_buffer(state), 
 				       column.buffer,column.type.strlen_or_indptr);
@@ -2677,8 +2697,7 @@ static void * retrive_param_values(param_array *Param)
 */
 
 
-static db_column retrive_binary_data(db_column column, int column_nr,
-				     db_state *state)
+static db_column retrive_binary_data(db_column column, int column_nr, int* result_len_out, db_state *state)
 { 
     char *outputptr;
     int blocklen, outputlen, result;
@@ -2687,8 +2706,10 @@ static db_column retrive_binary_data(db_column column, int column_nr,
     blocklen = column.type.len;
     outputptr = column.buffer;
     result = SQLGetData(statement_handle(state), (SQLSMALLINT)(column_nr+1),
-			SQL_C_CHAR, outputptr,
+			column.type.c, outputptr,
 			blocklen, &column.type.strlen_or_indptr);
+
+    *result_len_out = column.type.strlen_or_indptr;
 
     while (result == SQL_SUCCESS_WITH_INFO) {
 
@@ -2704,7 +2725,10 @@ static db_column retrive_binary_data(db_column column, int column_nr,
 				(SQLSMALLINT)(column_nr+1), SQL_C_CHAR,
 				outputptr, blocklen,
 				&column.type.strlen_or_indptr);
-	}
+        *result_len_out += column.type.strlen_or_indptr;
+	} else {
+        result = SQL_SUCCESS; // not truncated
+    }
     }
   
     if (result == SQL_SUCCESS) {
@@ -3011,4 +3035,77 @@ static void str_tolower(char *str, int len)
 	for(i = 0; i <= len; i++) {
 		str[i] = tolower(str[i]);
 	}
+}
+
+/* Allocs and sets bufferptr
+ * Sets result_len
+ */
+void retrive_wide_string_data(
+        db_column column,
+        int column_nr,
+        char** result_buf,
+        int* result_len,
+        db_state* state) {
+    // That moment, when IBM has better docs than MS
+    // https://www.ibm.com/support/knowledgecenter/ssw_ibm_i_74/cli/rzadpfnbndpm.htm
+    SQLRETURN     rc;
+    const int sizeof_element = sizeof(SQLWCHAR); // 2 bytes
+    const int chunk_bytes = sizeof_element * 101;
+    int buff_bytes = chunk_bytes;
+    int offset_bytes = 0;
+    SQLLEN byte_len_or_ind = 0;
+    int truncated;
+    int got_bytes;
+    diagnos diagnos;
+
+    // pointer to the beginning of the string
+    char* bufferptr = (void*) safe_malloc(buff_bytes);
+
+    // Retrieve data in parts.
+    // Sets byte_len_or_ind
+    // Writes chunk_bytes bytes into a buffer. Though 2 last bytes are a null terminator.
+    // So, it's (chunk_bytes-2) actual bytes
+    for (int i = 0; 1; i++) {
+        // Free space for a new chunk in bytes.
+        // This condition applies:
+        // int chunk_bytes = buff_bytes - offset_bytes;
+
+        /*
+         Writes maximum BufferLength bytes into a TargetValuePtr
+         (BufferLength - 2) bytes of actual data + 2 bytes as a null terminator
+    
+         SQLRETURN SQLGetData(
+          SQLHSTMT       StatementHandle,
+          SQLUSMALLINT   Col_or_Param_Num,
+          SQLSMALLINT    TargetType,
+          SQLPOINTER     TargetValuePtr,
+          SQLLEN         BufferLength,
+          SQLLEN *       StrLen_or_IndPtr); 
+         */
+        byte_len_or_ind = 0;
+        rc = SQLGetData(statement_handle(state),
+                        (SQLSMALLINT)(column_nr+1), SQL_C_WCHAR,
+                        bufferptr + offset_bytes, // where to append data
+                        chunk_bytes,
+                        &byte_len_or_ind);
+//      if (rc == SQL_NO_DATA) break;
+        if (!sql_success(rc)) break;
+
+        diagnos = get_diagnos(SQL_HANDLE_STMT, statement_handle(state), extended_errors(state));
+        truncated = (strcmp((char *)diagnos.sqlState, TRUNCATED) == 0);
+
+        // Number of written bytes without NULL terminator
+        got_bytes = ((byte_len_or_ind == SQL_NULL_DATA) || (byte_len_or_ind > chunk_bytes)) ? (chunk_bytes - sizeof_element) : byte_len_or_ind;
+        offset_bytes += got_bytes;
+
+        if (!truncated) break;
+
+        // Enlarge buffer by a number of written
+        buff_bytes += got_bytes;
+
+        bufferptr = safe_realloc((void *) bufferptr, buff_bytes);
+    }
+
+    *result_len = offset_bytes;
+    *result_buf = bufferptr;
 }
