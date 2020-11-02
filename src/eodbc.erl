@@ -363,6 +363,8 @@ select(ConnectionReference, {absolute, Pos} , N, TimeOut)
 param_query(ConnectionReference, SQLQuery, Params) ->
     param_query(ConnectionReference, SQLQuery, Params, ?DEFAULT_TIMEOUT).
 
+param_query(ConnectionReference, SQLQuery, Params, Timeout) when is_binary(SQLQuery) ->
+    param_query(ConnectionReference, binary_to_list(SQLQuery), Params, Timeout);
 param_query(ConnectionReference, SQLQuery, Params, infinity) 
   when is_pid(ConnectionReference), is_list(SQLQuery), is_list(Params) ->
     Values = param_values(Params),
@@ -958,6 +960,8 @@ fix_params({{sql_wvarchar, Max}, InOut, Values}) ->
 fix_params({{sql_wlongvarchar, Max}, InOut, Values}) ->
     NewValues = string_terminate(Values),
     {?USER_WLONGVARCHAR, Max, fix_inout(InOut), NewValues};
+fix_params({{sql_longvarbinary, Max}, InOut, Values}) ->
+    {?USER_LONGVARBINARY, Max, fix_inout(InOut), Values};
 fix_params({{sql_float, Precision}, InOut, Values}) ->
     {?USER_FLOAT, Precision, fix_inout(InOut), Values};
 fix_params({sql_real, InOut, Values}) ->
