@@ -5,3 +5,4 @@ priv/eodbcserver
 _build
 .*.sw*
 .rebar3
+rebar.lock

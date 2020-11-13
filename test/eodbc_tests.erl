@@ -71,6 +71,11 @@ varchar_max_test() ->
     check_varchar_max(20000),
     check_varchar_max(100000).
 
+varlongbinary_test() ->
+    check_varlongbinary(<<65,64>>),
+    check_varlongbinary(<<65,0,64>>), %% With NULL in the middle
+    check_varlongbinary(<<65,64,0>>).
+
 check_varbinary(Times) ->
     Type = "varbinary(" ++ integer_to_list(Times) ++ ")",
     check_varbinary(Times, Type).
@@ -127,3 +132,14 @@ check_varchar(Times, Type) ->
     {updated,1} = eodbc:sql_query(Conn, "insert into test_types values ('" ++ Value ++ "')"),
     ?assertEqual({selected,["test_column"],[{Value}]},
                  eodbc:sql_query(Conn, "select test_column from test_types")).
+
+check_varlongbinary(Value) when is_binary(Value) ->
+    Conn = connect_to_database(),
+	Query = "SELECT ?",
+	ODBCParams = [{{sql_longvarbinary,3},[Value]}],
+	Result = eodbc:param_query(Conn, Query, ODBCParams, 5000),
+    Hex = encode_hex(Value),
+    ?assertEqual({selected, [[]], [{Hex}]}, Result).
+
+encode_hex(Bin) ->
+    [begin if N < 10 -> 48 + N; true -> 87 + N end end || <<N:4>> <= Bin].

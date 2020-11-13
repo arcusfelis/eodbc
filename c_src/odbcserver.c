@@ -939,7 +939,8 @@ static db_result_msg db_param_query(byte *buffer, db_state *state)
 	    DO_EXIT(EXIT_FREE);
 	} 
     } else {
-	msg = encode_atom_message("param_badarg");
+        // params == NULL
+	    msg = encode_atom_message("param_badarg");
     }
     
     free(sql); 
@@ -1797,6 +1798,10 @@ static Boolean decode_params(db_state *state, byte *buffer, int *index, param_ar
 	    ei_decode_binary(buffer, index, &(param->values.string[param->offset]), &bin_size);
 	    param->offset += param->type.len;
 	    break;
+    case SQL_C_BINARY:
+	    ei_decode_binary(buffer, index, &(param->values.string[param->offset]), &bin_size);
+	    param->offset += param->type.len;
+	    break;
     case SQL_C_TYPE_TIMESTAMP:
 	    ts = (TIMESTAMP_STRUCT*) param->values.string;
 	    ei_decode_tuple_header(buffer, index, &size);
@@ -2392,14 +2397,43 @@ static void init_param_column(param_array *params, byte *buffer, int *index,
 	ei_decode_long(buffer, index, &length);
 	/* Max string length + string terminator */
 	params->type.len = (length+1)*sizeof(SQLWCHAR);
-        params->type.c = SQL_C_WCHAR;
-        params->type.col_size = (SQLUINTEGER)length;
+    params->type.c = SQL_C_WCHAR;
+    params->type.col_size = (SQLUINTEGER)length;
 	params->type.strlen_or_indptr_array
 	    = alloc_strlen_indptr(num_param_values, SQL_NTS);
-        params->values.string =
+    params->values.string =
           (byte *)safe_malloc(num_param_values * sizeof(byte) * params->type.len);
 	
 	break;
+
+    // also SQL_BLOB
+    case USER_LONGVARBINARY:
+/*
+SQLRETURN SQLBindParameter(
+      SQLHSTMT        StatementHandle,
+      SQLUSMALLINT    ParameterNumber,
+      SQLSMALLINT     InputOutputType,
+      SQLSMALLINT     ValueType,
+      SQLSMALLINT     ParameterType,
+      SQLULEN         ColumnSize,
+      SQLSMALLINT     DecimalDigits,
+      SQLPOINTER      ParameterValuePtr,
+      SQLLEN          BufferLength,
+      SQLLEN *        StrLen_or_IndPtr);
+*/
+    // We need to properly setup and initialize StrLen_or_IndPtr argument.
+    // For binary buffers, the value of StrLen_or_IndPtr must be the length of the data held in the buffer.
+	ei_decode_long(buffer, index, &length);
+    // update col_type
+    params->type.c = SQL_C_BINARY;
+    params->type.sql = SQL_LONGVARBINARY; 
+    params->type.col_size = length;
+    params->type.len = length;
+	params->type.strlen_or_indptr_array
+	    = alloc_strlen_indptr(num_param_values, length);
+    params->values.string = (byte *)safe_malloc(num_param_values * length);
+    break;
+
     case USER_TIMESTAMP:
       params->type.sql = SQL_TYPE_TIMESTAMP;
       params->type.len = sizeof(TIMESTAMP_STRUCT);
@@ -2648,7 +2682,7 @@ static param_array * bind_parameter_arrays(byte *buffer, int *index,
 	    if(!decode_params(state, buffer, index, &params, i, j, num_param_values)) {
 		/* An input parameter was not of the expected type */  
 		free_params(&params, i);
-		return params;
+		return params; // NULL
 	    }
 	}
 
@@ -2676,6 +2710,7 @@ static void * retrive_param_values(param_array *Param)
     case SQL_C_CHAR:
     case SQL_C_WCHAR:
     case SQL_C_TYPE_TIMESTAMP:
+    case SQL_C_BINARY:
         return (void *)Param->values.string;
     case SQL_C_SLONG:
 	return (void *)Param->values.integer;

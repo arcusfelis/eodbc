@@ -15,7 +15,7 @@ services:
 script: ./rebar3 eunit
 
 before_install:
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install unixodbc ; fi
+# - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install unixodbc ; fi # already installed
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install freetds --with-unixodbc ; fi
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install erlang ; fi
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then DB=mssql ./tools/travis-setup-db.sh ; fi
