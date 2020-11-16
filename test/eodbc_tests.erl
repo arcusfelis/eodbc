@@ -136,7 +136,7 @@ check_varchar(Times, Type) ->
 check_varlongbinary(Value) when is_binary(Value) ->
     Conn = connect_to_database(),
 	Query = "SELECT ?",
-	ODBCParams = [{{sql_longvarbinary,3},[Value]}],
+	ODBCParams = [{{sql_longvarbinary,byte_size(Value)},[Value]}],
 	Result = eodbc:param_query(Conn, Query, ODBCParams, 5000),
     Hex = encode_hex(Value),
     ?assertEqual({selected, [[]], [{Hex}]}, Result).

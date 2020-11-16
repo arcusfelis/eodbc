@@ -242,20 +242,14 @@ static param_array * bind_parameter_arrays(byte *buffer, int *index,
 					   db_state *state);
 static void * retrive_param_values(param_array *Param);
 
-static db_column retrive_binary_data(db_column column, int column_nr,
-                     int* result_len, db_state *state);
-
-static void retrive_long_data(db_column column, int column_nr,
-                     SQLSMALLINT TargetType,
-				     db_state *state,
-                     char** bufferptr_out,
-                     int* totallen_out);
-
-static void retrive_wide_string_data(
+static void retrive_long_data(
         db_column column,
         int column_nr,
+        SQLSMALLINT target_type,
         char** result_buf,
         int* result_len,
+        int sizeof_element,
+        int term_bytes,
         db_state* state);
 
 static db_result_msg retrive_scrollable_cursor_support_info(db_state
@@ -1368,10 +1362,13 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
 		    (char *)safe_malloc(columns(state)[i].type.len);
 	
 		if (columns(state)[i].type.c == SQL_C_WCHAR) {
-		    /* retrived later by retrive_binary_data */
+		    /* retrived later by retrive_long_data */
+        } else
+		if (columns(state)[i].type.c == SQL_C_CHAR) {
+		    /* retrived later by retrive_long_data */
         } else
 		if (columns(state)[i].type.c == SQL_C_BINARY) {
-		    /* retrived later by retrive_binary_data */
+		    /* retrived later by retrive_long_data */
 		} else {
 		    if(!sql_success(
 			SQLBindCol
@@ -1557,46 +1554,18 @@ static void encode_column_dyn(db_column column, int column_nr,
             ei_x_encode_ulong(&dynamic_buffer(state), ts->minute);
             ei_x_encode_ulong(&dynamic_buffer(state), ts->second);
             break;
-	case SQL_C_CHAR:
-//      syslog (LOG_INFO, "strlen_or_indptr=%d colsize=%d len=%d buffer=%p",
-//              column.type.strlen_or_indptr,
-//              column.type.col_size,
-//              column.type.len,
-//              column.buffer);
-        if (column.type.strlen_or_indptr <= column.type.col_size)
-        {
-			if binary_strings(state) {
-				 ei_x_encode_binary(&dynamic_buffer(state),
-						    column.buffer,column.type.strlen_or_indptr);
-			} else {
-				ei_x_encode_string(&dynamic_buffer(state), column.buffer);
-			}
-        } else {
-            /* Let's assume that result length is unknown.
-               extract part by part.
-               handles https://bugs.erlang.org/browse/ERL-421
 
-               ODBC truncates data for LONGTEXT and BLOB
-
-               column.type.col_size bytes of data are already in column.buffer.
-               */
-            char *bufferptr;
-            /* in bytes */
-            int result_len;
-
-            /* writes info into bufferptr and totallen
-               allocates bufferptr */
-            retrive_long_data(column, column_nr, SQL_C_CHAR, state, &bufferptr, &result_len);
-
+	case SQL_C_CHAR: {
+            char *bufferptr = 0;
+            int result_len = 0; /* in bytes */
+            retrive_long_data(column, column_nr, SQL_C_CHAR, &bufferptr, &result_len, 1, 1, state);
 			if binary_strings(state) {
 				 ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
 			} else {
-				ei_x_encode_string(&dynamic_buffer(state), bufferptr);
+                ei_x_encode_string_len(&dynamic_buffer(state), bufferptr, result_len);
 			}
-
             free(bufferptr);
-        }
-	    break;
+	    break; }
 
 	case SQL_C_WCHAR: {
         // Read chunks of data.
@@ -1604,7 +1573,8 @@ static void encode_column_dyn(db_column column, int column_nr,
         // https://docs.microsoft.com/en-us/sql/relational-databases/native-client/features/odbc-driver-behavior-change-when-handling-character-conversions?view=sql-server-ver15
         char *bufferptr = 0;
         int result_len = 0; /* in bytes */
-        retrive_wide_string_data(column, column_nr, &bufferptr, &result_len, state);
+        const int sizeof_element = sizeof(SQLWCHAR); // 2 bytes
+        retrive_long_data(column, column_nr, SQL_C_WCHAR, &bufferptr, &result_len, sizeof_element, sizeof_element, state);
         ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
         free(bufferptr);
 	    break; }
@@ -1621,15 +1591,13 @@ static void encode_column_dyn(db_column column, int column_nr,
 	    ei_x_encode_atom(&dynamic_buffer(state),
 			     column.buffer[0]?"true":"false");
 	    break;
-	case SQL_C_BINARY:		
-	    column = retrive_binary_data(column, column_nr, &result_len, state);
-	    if binary_strings(state) {
-		    ei_x_encode_binary(&dynamic_buffer(state), 
-				       column.buffer,column.type.strlen_or_indptr);
-	    } else {
-		    ei_x_encode_string(&dynamic_buffer(state), (void *)column.buffer);
-	    }
-	    break;
+	case SQL_C_BINARY: {
+        char *bufferptr = 0;
+        int result_len = 0; /* in bytes */
+        retrive_long_data(column, column_nr, SQL_C_BINARY, &bufferptr, &result_len, 1, 0, state);
+		ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
+        free(bufferptr);
+	    break; }
 	default:
 	    ei_x_encode_atom(&dynamic_buffer(state), "error");
 	    break;
@@ -2723,213 +2691,6 @@ static void * retrive_param_values(param_array *Param)
     }
 }
 
-/* Description: More than one call to SQLGetData may be required to retrieve
-   data from a single column with  binary data. SQLGetData then returns
-   SQL_SUCCESS_WITH_INFO nd the SQLSTATE will have the value 01004 (Data
-   truncated). The application can then use the same column number to
-   retrieve subsequent parts of the data until SQLGetData returns
-   SQL_SUCCESS, indicating that all data for the column has been retrieved.
-*/
-
-
-static db_column retrive_binary_data(db_column column, int column_nr, int* result_len_out, db_state *state)
-{ 
-    char *outputptr;
-    int blocklen, outputlen, result;
-    diagnos diagnos;
-  
-    blocklen = column.type.len;
-    outputptr = column.buffer;
-    result = SQLGetData(statement_handle(state), (SQLSMALLINT)(column_nr+1),
-			column.type.c, outputptr,
-			blocklen, &column.type.strlen_or_indptr);
-
-    *result_len_out = column.type.strlen_or_indptr;
-
-    while (result == SQL_SUCCESS_WITH_INFO) {
-
-	diagnos = get_diagnos(SQL_HANDLE_STMT, statement_handle(state), extended_errors(state));
-    
-	if(strcmp((char *)diagnos.sqlState, TRUNCATED) == 0) {
-	    outputlen = column.type.len - 1;
-	    column.type.len = outputlen + blocklen;
-	    column.buffer =
-		safe_realloc((void *)column.buffer, column.type.len);
-	    outputptr = column.buffer + outputlen;
-	    result = SQLGetData(statement_handle(state),
-				(SQLSMALLINT)(column_nr+1), SQL_C_CHAR,
-				outputptr, blocklen,
-				&column.type.strlen_or_indptr);
-        *result_len_out += column.type.strlen_or_indptr;
-	} else {
-        result = SQL_SUCCESS; // not truncated
-    }
-    }
-  
-    if (result == SQL_SUCCESS) {
-	return column;
-    } else {
-	DO_EXIT(EXIT_BIN); 
-    }
-}
-
-/* This function does not touch column data */
-static void retrive_long_data(db_column column, int column_nr,
-                     SQLSMALLINT TargetType,
-				     db_state *state,
-                     char** bufferptr_out,
-                     int* result_len_out)
-{ 
-//  syslog (LOG_INFO, "CALL retrive_long_data");
-    char *bufferptr;
-    char *outputptr;
-    /* Nobody knows if StrLen_or_IndPtr works or not.
-       If it works, it shows how much data is rest. */
-    SQLLEN * StrLen_or_IndPtr;
-
-    /* in bytes */
-    int totallen, blocklen, result, fetched_bytes, result_len, data_len;
-    diagnos diagnos;
-
-    int maybe_nullterm = 0;
-
-    // The driver uses BufferLength to avoid writing past the end of the
-    // *TargetValuePtr buffer when returning variable-length data, such as
-    // character or binary data. Note that the driver counts the
-    // null-termination character when returning character data to
-    // *TargetValuePtr. *TargetValuePtr must therefore contain space for the
-    // null-termination character, or the driver will truncate the data.
-//  if (column.type.sql == SQL_CHAR
-//      || column.type.sql == SQL_VARCHAR
-//      || column.type.sql == SQL_LONGVARCHAR)
-//      maybe_nullterm = 1;
-    // But it looks that ODBC likes to insert the null terminators all the time
-    maybe_nullterm = 1;
-
-    // column.type.col_size bytes of data are already in column.buffer.
-
-    // blocklen contains one extra byte for a null terminator
-    blocklen = 5000 + maybe_nullterm;
-    totallen = blocklen + column.type.col_size + 1;
-    // allocate space for already extracted data + a new block of data
-    bufferptr = outputptr = (void*) safe_malloc(totallen);
-    // reset buffer for simple debugging
-//  for (int i = 0; i < totallen; i++) bufferptr[i] = 0; // debug
-
-    // Ignore null terminator if present
-    data_len = column.type.col_size - maybe_nullterm;
-//  data_len = column.type.col_size;
-
-    StrLen_or_IndPtr = column.type.strlen_or_indptr;
-    fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > column.type.col_size))
-            ? (column.type.col_size-maybe_nullterm) : StrLen_or_IndPtr);
-    data_len = fetched_bytes;
-
-    // copy already extracted data from column.buffer to outputptr
-    memcpy(outputptr, column.buffer, data_len);
-
-//  syslog (LOG_INFO, "strlen_or_indptr=%d fetched_bytes=%d outputptr[fetched_bytes]=%d",
-//          StrLen_or_IndPtr, fetched_bytes, outputptr[fetched_bytes]);
-//  syslog (LOG_INFO, "outputptr[fetched_bytes-1]=%d",
-//          outputptr[fetched_bytes-1]);
-//  syslog (LOG_INFO, "outputptr[fetched_bytes-2]=%d",
-//          outputptr[fetched_bytes-2]);
-
-    outputptr = outputptr + data_len;
-
-    // result_len does not count the null terminator
-    result_len = data_len;
-
-//  if (!outputptr[-1])
-//      syslog (LOG_INFO, "it's ok to have a null there. but can be unexpected null terminator");
-
-//  if (maybe_nullterm && column.buffer[data_len])
-//      syslog (LOG_INFO,
-//              "warning! column.buffer[data_len]=%d but null expected. data_len=%d column.type.strlen_or_indptr=%d",
-//              column.buffer[data_len], data_len, column.type.strlen_or_indptr);
-
-//  StrLen_or_IndPtr = 0; // for debugging
-//  outputptr[blocklen-1] = 0; // for debugging
-//  syslog (LOG_INFO, "before outputptr[-1]=%d", outputptr[-1]);
-//  syslog (LOG_INFO, "before outputptr[0]=%d", outputptr[0]);
-//  syslog (LOG_INFO, "before outputptr[1]=%d", outputptr[1]);
-//  syslog (LOG_INFO, "before outputptr[2]=%d", outputptr[2]);
-    result = SQLGetData(statement_handle(state),
-            (SQLSMALLINT)(column_nr+1),
-			TargetType, outputptr,
-			blocklen, &StrLen_or_IndPtr);
-
-//  syslog (LOG_INFO, "outputptr[-1]=%d", outputptr[-1]);
-//  syslog (LOG_INFO, "outputptr[0]=%d", outputptr[0]);
-//  syslog (LOG_INFO, "outputptr[1]=%d", outputptr[1]);
-//  syslog (LOG_INFO, "outputptr[2]=%d", outputptr[2]);
-
-    // terminator is not counted if present
-    // ACTUALLY, there are two nulls possible in some cases (i.e. when buffer
-    // is 5000, not 5001)
-    fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > blocklen))
-            ? (blocklen-maybe_nullterm) : StrLen_or_IndPtr);
-
-//  syslog (LOG_INFO, "strlen_or_indptr=%d fetched_bytes=%d outputptr[fetched_bytes]=%d after getdata",
-//          StrLen_or_IndPtr, fetched_bytes, outputptr[fetched_bytes]);
-//  syslog (LOG_INFO, "outputptr[fetched_bytes-1]=%d after getdata",
-//          outputptr[fetched_bytes-1]);
-//  syslog (LOG_INFO, "outputptr[fetched_bytes-2]=%d after getdata",
-//          outputptr[fetched_bytes-2]);
-
-
-    result_len = result_len + fetched_bytes;
-//  syslog (LOG_INFO, "blocklen=%d fetched_bytes=%d outputptr[blocklen-1]=%d",
-//          blocklen, fetched_bytes, outputptr[blocklen-1]);
-
-//  if (outputptr[blocklen-1] && maybe_nullterm)
-//      syslog (LOG_INFO, "warning! outputptr[blocklen]=%d but null expected",
-//              outputptr[blocklen]);
-
-//  syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
-
-    int i = 0;
-    while (result == SQL_SUCCESS_WITH_INFO) {
-
-    diagnos = get_diagnos(SQL_HANDLE_STMT, statement_handle(state), extended_errors(state));
-    
-    if(strcmp((char *)diagnos.sqlState, TRUNCATED) == 0) {
-        // totallen counts null terminator if present
-        totallen = result_len + blocklen;
-        // extend bufferptr buffer
-        bufferptr = safe_realloc((void *) bufferptr, totallen);
-        outputptr = bufferptr + result_len;
-//      syslog (LOG_INFO, "setting outputptr result_len=%d after fetched_bytes=%d i=%d", result_len, fetched_bytes, i);
-//      if (!outputptr[-1])
-//          syslog (LOG_INFO, "it's ok to have a null there. but can be unexpected null terminator (in cycle)");
-//      outputptr[blocklen-1] = 0; // for debugging
-        result = SQLGetData(statement_handle(state),
-                (SQLSMALLINT)(column_nr+1), TargetType,
-                outputptr, blocklen,
-                &StrLen_or_IndPtr);
-        // one byte is reserved for a null terminator
-        fetched_bytes = (((StrLen_or_IndPtr == SQL_NO_TOTAL) || (StrLen_or_IndPtr > (blocklen-maybe_nullterm)))
-                ? (blocklen-maybe_nullterm) : StrLen_or_IndPtr);
-//      if (outputptr[blocklen-1] && maybe_nullterm)
-//          syslog (LOG_INFO, "warning! outputptr[blocklen]=%d but null expected",
-//                  outputptr[blocklen]);
-//      syslog (LOG_INFO, "result_len=%d + fetched_bytes=%d",
-//              result_len, fetched_bytes);
-        result_len = result_len + fetched_bytes;
-//      syslog (LOG_INFO, "strlen_or_indptr=%d blocklen=%d result_len=%d", StrLen_or_IndPtr, blocklen, result_len);
-    }
-    i++;
-    }
-    if (result == SQL_SUCCESS) {
-//      syslog (LOG_INFO, "RETURN retrive_long_data");
-        *bufferptr_out = bufferptr;
-        *result_len_out = result_len;
-        return;
-    } else {
-	DO_EXIT(EXIT_LONG_DATA); 
-    }
-}
-
 /* Description: Returns information about support for scrollable cursors */ 
 static db_result_msg retrive_scrollable_cursor_support_info(db_state *state)
 {
@@ -3075,17 +2836,27 @@ static void str_tolower(char *str, int len)
 /* Allocs and sets bufferptr
  * Sets result_len
  */
-void retrive_wide_string_data(
+
+/* Description: More than one call to SQLGetData may be required to retrieve
+   data from a single column with  binary data. SQLGetData then returns
+   SQL_SUCCESS_WITH_INFO nd the SQLSTATE will have the value 01004 (Data
+   truncated). The application can then use the same column number to
+   retrieve subsequent parts of the data until SQLGetData returns
+   SQL_SUCCESS, indicating that all data for the column has been retrieved.
+*/
+void retrive_long_data(
         db_column column,
         int column_nr,
+        SQLSMALLINT target_type,
         char** result_buf,
         int* result_len,
+        int sizeof_element,
+        int term_bytes,
         db_state* state) {
     // That moment, when IBM has better docs than MS
     // https://www.ibm.com/support/knowledgecenter/ssw_ibm_i_74/cli/rzadpfnbndpm.htm
     SQLRETURN     rc;
-    const int sizeof_element = sizeof(SQLWCHAR); // 2 bytes
-    const int chunk_bytes = sizeof_element * 101;
+    const int chunk_bytes = sizeof_element * 5001; // Should be odd to avoid different alignment issues
     int buff_bytes = chunk_bytes;
     int offset_bytes = 0;
     SQLLEN byte_len_or_ind = 0;
@@ -3119,7 +2890,8 @@ void retrive_wide_string_data(
          */
         byte_len_or_ind = 0;
         rc = SQLGetData(statement_handle(state),
-                        (SQLSMALLINT)(column_nr+1), SQL_C_WCHAR,
+                        (SQLSMALLINT)(column_nr+1),
+                        target_type,
                         bufferptr + offset_bytes, // where to append data
                         chunk_bytes,
                         &byte_len_or_ind);
@@ -3130,7 +2902,8 @@ void retrive_wide_string_data(
         truncated = (strcmp((char *)diagnos.sqlState, TRUNCATED) == 0);
 
         // Number of written bytes without NULL terminator
-        got_bytes = ((byte_len_or_ind == SQL_NULL_DATA) || (byte_len_or_ind > chunk_bytes)) ? (chunk_bytes - sizeof_element) : byte_len_or_ind;
+        got_bytes = (byte_len_or_ind >= chunk_bytes) ? (chunk_bytes - term_bytes) : byte_len_or_ind;
+        if (byte_len_or_ind == SQL_NULL_DATA) got_bytes = 0;
         offset_bytes += got_bytes;
 
         if (!truncated) break;
