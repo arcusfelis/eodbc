@@ -15,9 +15,6 @@ services:
 script: ./rebar3 eunit
 
 before_install:
-# - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install unixodbc ; fi # already installed
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install freetds --with-unixodbc ; fi
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install erlang ; fi
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then DB=mssql ./tools/travis-setup-db.sh ; fi
 
 matrix:
@@ -28,6 +25,7 @@ matrix:
       otp_release: 19.3
     - os: linux
       otp_release: 20.0
-    - os: osx
-      language: generic
-      script: ./rebar3 compile # Check that it at least compiles
+    - os: linux
+      otp_release: 21.0
+    - os: linux
+      otp_release: 22.0
