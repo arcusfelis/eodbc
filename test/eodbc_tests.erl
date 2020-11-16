@@ -117,11 +117,13 @@ check_nvarchar(Times, Type) ->
 
 check_varchar(Times) ->
     Type = "varchar(" ++ integer_to_list(Times) ++ ")",
-    check_varchar(Times, Type).
+    check_varchar(Times, Type),
+    check_varchar_null(Type).
 
 check_varchar_max(Times) ->
     Type = "varchar(max)",
-    check_varchar(Times, Type).
+    check_varchar(Times, Type),
+    check_varchar_null(Type).
 
 check_varchar(Times, Type) ->
     Conn = connect_to_database(),
@@ -143,3 +145,12 @@ check_varlongbinary(Value) when is_binary(Value) ->
 
 encode_hex(Bin) ->
     [begin if N < 10 -> 48 + N; true -> 87 + N end end || <<N:4>> <= Bin].
+
+check_varchar_null(Type) ->
+    Conn = connect_to_database(),
+    eodbc:sql_query(Conn, "drop table test_types"),
+    {updated,undefined} = eodbc:sql_query(Conn, "create table test_types(test_column " ++ Type ++ ")"),
+    {selected,["test_column"],[]} = eodbc:sql_query(Conn, "select test_column from test_types"),
+    {updated,1} = eodbc:sql_query(Conn, "insert into test_types values (NULL)"),
+    ?assertEqual({selected,["test_column"],[{null}]},
+                 eodbc:sql_query(Conn, "select test_column from test_types")).

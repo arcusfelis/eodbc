@@ -1558,12 +1558,16 @@ static void encode_column_dyn(db_column column, int column_nr,
             char *bufferptr = 0;
             int result_len = 0; /* in bytes */
             retrive_long_data(column, column_nr, SQL_C_CHAR, &bufferptr, &result_len, 1, 1, state);
-			if binary_strings(state) {
-				 ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
-			} else {
-                ei_x_encode_string_len(&dynamic_buffer(state), bufferptr, result_len);
-			}
-            free(bufferptr);
+            if (bufferptr) {
+				if binary_strings(state) {
+					 ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
+				} else {
+                    ei_x_encode_string_len(&dynamic_buffer(state), bufferptr, result_len);
+				}
+                free(bufferptr);
+            } else {
+                ei_x_encode_atom(&dynamic_buffer(state), "null");
+            }
 	    break; }
 
 	case SQL_C_WCHAR: {
@@ -1574,8 +1578,12 @@ static void encode_column_dyn(db_column column, int column_nr,
         int result_len = 0; /* in bytes */
         const int sizeof_element = sizeof(SQLWCHAR); // 2 bytes
         retrive_long_data(column, column_nr, SQL_C_WCHAR, &bufferptr, &result_len, sizeof_element, sizeof_element, state);
-        ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
-        free(bufferptr);
+        if (bufferptr) {
+            ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
+            free(bufferptr);
+        } else {
+            ei_x_encode_atom(&dynamic_buffer(state), "null");
+        }
 	    break; }
 
 	case SQL_C_SLONG:
@@ -1594,8 +1602,12 @@ static void encode_column_dyn(db_column column, int column_nr,
         char *bufferptr = 0;
         int result_len = 0; /* in bytes */
         retrive_long_data(column, column_nr, SQL_C_BINARY, &bufferptr, &result_len, 1, 0, state);
-		ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
-        free(bufferptr);
+        if (bufferptr) {
+            ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
+            free(bufferptr);
+        } else {
+            ei_x_encode_atom(&dynamic_buffer(state), "null");
+        }
 	    break; }
 	default:
 	    ei_x_encode_atom(&dynamic_buffer(state), "error");
@@ -2894,6 +2906,11 @@ void retrive_long_data(
                         bufferptr + offset_bytes, // where to append data
                         chunk_bytes,
                         &byte_len_or_ind);
+        if (byte_len_or_ind == SQL_NULL_DATA) {
+            *result_buf = NULL;
+            *result_len = 0;
+            return;
+        }
 //      if (rc == SQL_NO_DATA) break;
         if (!sql_success(rc)) break;
 
