@@ -1536,7 +1536,6 @@ static void encode_column_dyn(db_column column, int column_nr,
 			      db_state *state)
 {
     TIMESTAMP_STRUCT* ts;
-    int result_len = 0;
     if (column.type.len == 0 ||
 	column.type.strlen_or_indptr == SQL_NULL_DATA) {
 	ei_x_encode_atom(&dynamic_buffer(state), "null");
@@ -2833,9 +2832,6 @@ static void str_tolower(char *str, int len)
 	}
 }
 
-/* Allocs and sets bufferptr
- * Sets result_len
- */
 
 /* Description: More than one call to SQLGetData may be required to retrieve
    data from a single column with  binary data. SQLGetData then returns
@@ -2844,6 +2840,9 @@ static void str_tolower(char *str, int len)
    retrieve subsequent parts of the data until SQLGetData returns
    SQL_SUCCESS, indicating that all data for the column has been retrieved.
 */
+/* Allocs and sets bufferptr
+ * Sets result_len
+ */
 void retrive_long_data(
         db_column column,
         int column_nr,
@@ -2871,7 +2870,7 @@ void retrive_long_data(
     // Sets byte_len_or_ind
     // Writes chunk_bytes bytes into a buffer. Though 2 last bytes are a null terminator.
     // So, it's (chunk_bytes-2) actual bytes
-    for (int i = 0; 1; i++) {
+    while (1) {
         // Free space for a new chunk in bytes.
         // This condition applies:
         // int chunk_bytes = buff_bytes - offset_bytes;
