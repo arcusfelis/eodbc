@@ -363,6 +363,8 @@ select(ConnectionReference, {absolute, Pos} , N, TimeOut)
 param_query(ConnectionReference, SQLQuery, Params) ->
     param_query(ConnectionReference, SQLQuery, Params, ?DEFAULT_TIMEOUT).
 
+param_query(ConnectionReference, SQLQuery, Params, Timeout) when is_binary(SQLQuery) ->
+    param_query(ConnectionReference, binary_to_list(SQLQuery), Params, Timeout);
 param_query(ConnectionReference, SQLQuery, Params, infinity) 
   when is_pid(ConnectionReference), is_list(SQLQuery), is_list(Params) ->
     Values = param_values(Params),
