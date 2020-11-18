@@ -933,7 +933,6 @@ static db_result_msg db_param_query(byte *buffer, db_state *state)
 	    DO_EXIT(EXIT_FREE);
 	} 
     } else {
-        // params == NULL
 	    msg = encode_atom_message("param_badarg");
     }
     
@@ -1333,52 +1332,39 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
     // buffer length in retrive_long_data
 	(columns(state)[i]).type.col_size = 0;
       
-	msg = map_sql_2_c_column(&columns(state)[i], state);
-	if (msg.length > 0) {
-	    return msg; /* An error has occurred */
-	} else {
-	    if (columns(state)[i].type.len > 0) {
-        if (columns(state)[i].type.c == SQL_C_WCHAR) {
-            /* retrived later by retrive_long_data */
-        } else
-        if (columns(state)[i].type.c == SQL_C_CHAR) {
-            /* retrived later by retrive_long_data */
-        } else
-        if (columns(state)[i].type.c == SQL_C_BINARY) {
-            /* retrived later by retrive_long_data */
-        } else {
-            columns(state)[i].buffer =
-                (char *)safe_malloc(columns(state)[i].type.len);
-		    if(!sql_success(
-			SQLBindCol
-			(statement_handle(state),
-			 (SQLSMALLINT)(i+1),
-			 columns(state)[i].type.c,
-			 columns(state)[i].buffer,
-			 columns(state)[i].type.len,
-			 &columns(state)[i].type.strlen_or_indptr)))
-			DO_EXIT(EXIT_BIND);
-		}
-
+    msg = map_sql_2_c_column(&columns(state)[i], state);
+    if (msg.length > 0)
+        return msg; /* An error has occurred */
+    if (columns(state)[i].type.len > 0) {
+        switch (columns(state)[i].type.c) {
+            case SQL_C_WCHAR:
+            case SQL_C_CHAR:
+            case SQL_C_BINARY:
+                // retrived later by retrive_long_data
+                break;
+            default: {
+                columns(state)[i].buffer =
+                    (char *) safe_malloc(columns(state)[i].type.len);
+                SQLRETURN rc = SQLBindCol(statement_handle(state),
+                                          (SQLSMALLINT)(i+1),
+                                          columns(state)[i].type.c,
+                                          columns(state)[i].buffer,
+                                          columns(state)[i].type.len,
+                                          &columns(state)[i].type.strlen_or_indptr);
+                if (!sql_success(rc)) DO_EXIT(EXIT_BIND);
+            }
+        }
         if return_types(state) {
             ei_x_encode_tuple_header(&dynamic_buffer(state), 2);
             encode_data_type(sql_type, size, dec_digits, state);
-
-			ei_x_encode_string_len(&dynamic_buffer(state),
-					       (char *)name, name_len);
         }
-        else
-        {
-			ei_x_encode_string_len(&dynamic_buffer(state),
-					       (char *)name, name_len);
-        }
-	    }
-	    else {
-		columns(state)[i].type.len = 0;
-		columns(state)[i].buffer = NULL;
-	    }
-	}  
+        ei_x_encode_string_len(&dynamic_buffer(state),
+                       (char *)name, name_len);
+    } else {
+        columns(state)[i].type.len = 0;
+        columns(state)[i].buffer = NULL;
     }
+    } // end of for loop
     ei_x_encode_empty_list(&dynamic_buffer(state)); 
 
     return msg;
