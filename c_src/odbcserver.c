@@ -1495,6 +1495,17 @@ static db_result_msg encode_row_count(SQLINTEGER num_of_rows,
     }
     return msg;
 }
+void encode_binary_or_string(byte bin_strings, char* bufferptr, int result_len, db_state* state) {
+    if (bufferptr) {
+        if (bin_strings) {
+            ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
+        } else {
+            ei_x_encode_string_len(&dynamic_buffer(state), bufferptr, result_len);
+        }
+    } else {
+        ei_x_encode_atom(&dynamic_buffer(state), "null");
+    }
+}
 
 /* Description: Encodes the a column value into the "ei_x" - dynamic_buffer
    held by the state variable */
@@ -1524,16 +1535,19 @@ static void encode_column_dyn(db_column column, int column_nr,
             char *bufferptr = NULL;
             int result_len = 0; /* in bytes */
             retrive_long_data(column, column_nr, SQL_C_CHAR, &bufferptr, &result_len, 1, 1, state);
-            if (bufferptr) {
-                if binary_strings(state) {
-                    ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
-                } else {
-                    ei_x_encode_string_len(&dynamic_buffer(state), bufferptr, result_len);
-                }
+            encode_binary_or_string(binary_strings(state), bufferptr, result_len, state);
+            if (bufferptr)
                 free(bufferptr);
-            } else {
-                ei_x_encode_atom(&dynamic_buffer(state), "null");
-            }
+            break;
+        }
+
+        case SQL_C_BINARY: {
+            char *bufferptr = NULL;
+            int result_len = 0; /* in bytes */
+            retrive_long_data(column, column_nr, SQL_C_BINARY, &bufferptr, &result_len, 1, 0, state);
+            encode_binary_or_string(binary_strings(state), bufferptr, result_len, state);
+            if (bufferptr)
+                free(bufferptr);
             break;
         }
 
@@ -1541,16 +1555,13 @@ static void encode_column_dyn(db_column column, int column_nr,
             // Read chunks of data.
             // There is pretty high change to get <<0,0,0...>> as a column data on some systems otherwise
             // https://docs.microsoft.com/en-us/sql/relational-databases/native-client/features/odbc-driver-behavior-change-when-handling-character-conversions?view=sql-server-ver15
-            char *bufferptr = 0;
+            char *bufferptr = NULL;
             int result_len = 0; /* in bytes */
             const int sizeof_element = sizeof(SQLWCHAR); // 2 bytes
             retrive_long_data(column, column_nr, SQL_C_WCHAR, &bufferptr, &result_len, sizeof_element, sizeof_element, state);
-            if (bufferptr) {
-                ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
+            encode_binary_or_string(1, bufferptr, result_len, state);
+            if (bufferptr)
                 free(bufferptr);
-            } else {
-                ei_x_encode_atom(&dynamic_buffer(state), "null");
-            }
             break;
         }
 
@@ -1566,18 +1577,6 @@ static void encode_column_dyn(db_column column, int column_nr,
             ei_x_encode_atom(&dynamic_buffer(state),
                              column.buffer[0]?"true":"false");
             break;
-        case SQL_C_BINARY: {
-            char *bufferptr = 0;
-            int result_len = 0; /* in bytes */
-            retrive_long_data(column, column_nr, SQL_C_BINARY, &bufferptr, &result_len, 1, 0, state);
-            if (bufferptr) {
-                ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
-                free(bufferptr);
-            } else {
-                ei_x_encode_atom(&dynamic_buffer(state), "null");
-            }
-            break;
-        }
         default:
             ei_x_encode_atom(&dynamic_buffer(state), "error");
             break;
