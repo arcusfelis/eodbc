@@ -29,3 +29,5 @@ matrix:
       otp_release: 21.0
     - os: linux
       otp_release: 22.0
+    - os: linux
+      otp_release: 23.0

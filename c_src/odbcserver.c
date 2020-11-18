@@ -2825,8 +2825,9 @@ void retrive_long_data(
         db_state* state) {
     // That moment, when IBM has better docs than MS
     // https://www.ibm.com/support/knowledgecenter/ssw_ibm_i_74/cli/rzadpfnbndpm.htm
-    SQLRETURN     rc;
-    const int chunk_bytes = sizeof_element * 5001; // Should be odd to avoid different alignment issues
+    SQLRETURN rc;
+    // Should be odd to avoid different alignment issues
+    const int chunk_bytes = sizeof_element * 5001;
     int buff_bytes = chunk_bytes;
     int offset_bytes = 0;
     SQLLEN byte_len_or_ind = 0;
@@ -2843,10 +2844,11 @@ void retrive_long_data(
         byte_len_or_ind = 0;
         // Retrieve data in parts.
         // Sets byte_len_or_ind.
-        // Writes chunk_bytes bytes into a buffer. Though term_bytes last bytes are a null terminator.
+        // Writes chunk_bytes bytes into a buffer.
+        // Though term_bytes last bytes are a null terminator.
         // So, it's (chunk_bytes-2) actual bytes
         rc = SQLGetData(statement_handle(state),
-                        (SQLSMALLINT)(column_nr+1),
+                        column_nr+1,
                         target_type,
                         bufferptr + offset_bytes, // where to append data
                         chunk_bytes,
@@ -2857,18 +2859,21 @@ void retrive_long_data(
             *result_len = 0;
             return;
         }
-        if (!sql_success(rc)) break;
+        if (!sql_success(rc))
+            break;
 
         diagnos = get_diagnos(SQL_HANDLE_STMT, statement_handle(state), extended_errors(state));
-        truncated = (strcmp((char *)diagnos.sqlState, TRUNCATED) == 0);
+        truncated = (strcmp((char *) diagnos.sqlState, TRUNCATED) == 0);
 
         // Number of written bytes without a NULL terminator
-        got_bytes = (byte_len_or_ind >= chunk_bytes) ? (chunk_bytes - term_bytes) : byte_len_or_ind;
-        if (byte_len_or_ind == SQL_NULL_DATA) got_bytes = 0;
+        got_bytes = (byte_len_or_ind >= chunk_bytes)
+            ? (chunk_bytes - term_bytes)
+            : byte_len_or_ind;
         offset_bytes += got_bytes;
 
         // Loop exit condition
-        if (!truncated) break;
+        if (!truncated)
+            break;
 
         // Enlarge buffer by a number of written bytes
         buff_bytes += got_bytes;
