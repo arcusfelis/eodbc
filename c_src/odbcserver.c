@@ -1359,8 +1359,7 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
                 ei_x_encode_tuple_header(&dynamic_buffer(state), 2);
                 encode_data_type(sql_type, size, dec_digits, state);
             }
-            ei_x_encode_string_len(&dynamic_buffer(state),
-                                   (char *)name, name_len);
+            ei_x_encode_string_len(&dynamic_buffer(state), (char *)name, name_len);
         } else {
             columns(state)[i].type.len = 0;
             columns(state)[i].buffer = NULL;
