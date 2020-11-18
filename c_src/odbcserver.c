@@ -1338,18 +1338,17 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
 	    return msg; /* An error has occurred */
 	} else {
 	    if (columns(state)[i].type.len > 0) {
-		columns(state)[i].buffer =
-		    (char *)safe_malloc(columns(state)[i].type.len);
-	
-		if (columns(state)[i].type.c == SQL_C_WCHAR) {
-		    /* retrived later by retrive_long_data */
+        if (columns(state)[i].type.c == SQL_C_WCHAR) {
+            /* retrived later by retrive_long_data */
         } else
-		if (columns(state)[i].type.c == SQL_C_CHAR) {
-		    /* retrived later by retrive_long_data */
+        if (columns(state)[i].type.c == SQL_C_CHAR) {
+            /* retrived later by retrive_long_data */
         } else
-		if (columns(state)[i].type.c == SQL_C_BINARY) {
-		    /* retrived later by retrive_long_data */
-		} else {
+        if (columns(state)[i].type.c == SQL_C_BINARY) {
+            /* retrived later by retrive_long_data */
+        } else {
+            columns(state)[i].buffer =
+                (char *)safe_malloc(columns(state)[i].type.len);
 		    if(!sql_success(
 			SQLBindCol
 			(statement_handle(state),
@@ -1534,23 +1533,23 @@ static void encode_column_dyn(db_column column, int column_nr,
             ei_x_encode_ulong(&dynamic_buffer(state), ts->second);
             break;
 
-	case SQL_C_CHAR: {
+    case SQL_C_CHAR: {
             char *bufferptr = 0;
             int result_len = 0; /* in bytes */
             retrive_long_data(column, column_nr, SQL_C_CHAR, &bufferptr, &result_len, 1, 1, state);
             if (bufferptr) {
-				if binary_strings(state) {
-					 ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
-				} else {
+                if binary_strings(state) {
+                     ei_x_encode_binary(&dynamic_buffer(state), bufferptr, result_len);
+                } else {
                     ei_x_encode_string_len(&dynamic_buffer(state), bufferptr, result_len);
-				}
+                }
                 free(bufferptr);
             } else {
                 ei_x_encode_atom(&dynamic_buffer(state), "null");
             }
-	    break; }
+        break; }
 
-	case SQL_C_WCHAR: {
+    case SQL_C_WCHAR: {
         // Read chunks of data.
         // There is pretty high change to get <<0,0,0...>> as a column data on some systems otherwise
         // https://docs.microsoft.com/en-us/sql/relational-databases/native-client/features/odbc-driver-behavior-change-when-handling-character-conversions?view=sql-server-ver15
@@ -1564,7 +1563,7 @@ static void encode_column_dyn(db_column column, int column_nr,
         } else {
             ei_x_encode_atom(&dynamic_buffer(state), "null");
         }
-	    break; }
+        break; }
 
 	case SQL_C_SLONG:
 	    ei_x_encode_long(&dynamic_buffer(state),
@@ -1578,7 +1577,7 @@ static void encode_column_dyn(db_column column, int column_nr,
 	    ei_x_encode_atom(&dynamic_buffer(state),
 			     column.buffer[0]?"true":"false");
 	    break;
-	case SQL_C_BINARY: {
+    case SQL_C_BINARY: {
         char *bufferptr = 0;
         int result_len = 0; /* in bytes */
         retrive_long_data(column, column_nr, SQL_C_BINARY, &bufferptr, &result_len, 1, 0, state);
@@ -1588,7 +1587,7 @@ static void encode_column_dyn(db_column column, int column_nr,
         } else {
             ei_x_encode_atom(&dynamic_buffer(state), "null");
         }
-	    break; }
+        break; }
 	default:
 	    ei_x_encode_atom(&dynamic_buffer(state), "error");
 	    break;
