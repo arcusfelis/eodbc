@@ -1326,32 +1326,12 @@ static db_result_msg encode_column_name_list(SQLSMALLINT num_of_columns,
 				       &sql_type, &size, &dec_digits,
 				       &nullable)))
 	    DO_EXIT(EXIT_DESC);
-
-	if(sql_type == SQL_LONGVARCHAR || sql_type == SQL_LONGVARBINARY || sql_type == SQL_WLONGVARCHAR)
-	    size = MAXCOLSIZE;
-
-    // because otherwise SQLBindCol does not put data from VARCHAR(max)
-    // VARCHAR(max) has size=1073741823
-    //
-    // we don't want to apply it for unicode
-    if ((sql_type == SQL_BINARY || sql_type == SQL_VARBINARY) && size > MAXCOLSIZE)
-    {
-        size = MAXCOLSIZE;
-    }
-
-    // odbc does not like even buffers: i.e. 8000, 10000.
-    // correct to 8001, 10001 to fit null terminator.
-    // without it binaries encoded as HEX can loose one byte.
-    // i.e. "0500505" instead of "05050505".
-    if (sql_type == SQL_BINARY || sql_type == SQL_VARBINARY ||
-        sql_type == SQL_C_WCHAR ||
-        sql_type == SQL_LONGVARCHAR || sql_type == SQL_LONGVARBINARY || sql_type == SQL_WLONGVARCHAR)
-        if (size % 2 == 0)
-            size++;
     
 	(columns(state)[i]).type.decimal_digits = dec_digits;
 	(columns(state)[i]).type.sql = sql_type;
-	(columns(state)[i]).type.col_size = size;
+    // we are not using col_size anymore, because we would find the final
+    // buffer length in retrive_long_data
+	(columns(state)[i]).type.col_size = 0;
       
 	msg = map_sql_2_c_column(&columns(state)[i], state);
 	if (msg.length > 0) {
@@ -2845,16 +2825,10 @@ static void str_tolower(char *str, int len)
 }
 
 
-/* Description: More than one call to SQLGetData may be required to retrieve
-   data from a single column with  binary data. SQLGetData then returns
-   SQL_SUCCESS_WITH_INFO nd the SQLSTATE will have the value 01004 (Data
-   truncated). The application can then use the same column number to
-   retrieve subsequent parts of the data until SQLGetData returns
-   SQL_SUCCESS, indicating that all data for the column has been retrieved.
-*/
-/* Allocs and sets bufferptr
- * Sets result_len
- */
+// Extracts one field value in chunks.
+// This function allocates and sets bufferptr.
+// This function sets result_len.
+// The caller must release the memory in bufferptr.
 void retrive_long_data(
         db_column column,
         int column_nr,
@@ -2875,31 +2849,17 @@ void retrive_long_data(
     int got_bytes;
     diagnos diagnos;
 
-    // pointer to the beginning of the string
+    // It is a pointer to the beginning of the data
     char* bufferptr = (void*) safe_malloc(buff_bytes);
 
-    // Retrieve data in parts.
-    // Sets byte_len_or_ind
-    // Writes chunk_bytes bytes into a buffer. Though 2 last bytes are a null terminator.
-    // So, it's (chunk_bytes-2) actual bytes
     while (1) {
-        // Free space for a new chunk in bytes.
         // This condition applies:
         // int chunk_bytes = buff_bytes - offset_bytes;
-
-        /*
-         Writes maximum BufferLength bytes into a TargetValuePtr
-         (BufferLength - 2) bytes of actual data + 2 bytes as a null terminator
-    
-         SQLRETURN SQLGetData(
-          SQLHSTMT       StatementHandle,
-          SQLUSMALLINT   Col_or_Param_Num,
-          SQLSMALLINT    TargetType,
-          SQLPOINTER     TargetValuePtr,
-          SQLLEN         BufferLength,
-          SQLLEN *       StrLen_or_IndPtr); 
-         */
         byte_len_or_ind = 0;
+        // Retrieve data in parts.
+        // Sets byte_len_or_ind.
+        // Writes chunk_bytes bytes into a buffer. Though term_bytes last bytes are a null terminator.
+        // So, it's (chunk_bytes-2) actual bytes
         rc = SQLGetData(statement_handle(state),
                         (SQLSMALLINT)(column_nr+1),
                         target_type,
@@ -2907,24 +2867,25 @@ void retrive_long_data(
                         chunk_bytes,
                         &byte_len_or_ind);
         if (byte_len_or_ind == SQL_NULL_DATA) {
+            // Data is NULL
             *result_buf = NULL;
             *result_len = 0;
             return;
         }
-//      if (rc == SQL_NO_DATA) break;
         if (!sql_success(rc)) break;
 
         diagnos = get_diagnos(SQL_HANDLE_STMT, statement_handle(state), extended_errors(state));
         truncated = (strcmp((char *)diagnos.sqlState, TRUNCATED) == 0);
 
-        // Number of written bytes without NULL terminator
+        // Number of written bytes without a NULL terminator
         got_bytes = (byte_len_or_ind >= chunk_bytes) ? (chunk_bytes - term_bytes) : byte_len_or_ind;
         if (byte_len_or_ind == SQL_NULL_DATA) got_bytes = 0;
         offset_bytes += got_bytes;
 
+        // Loop exit condition
         if (!truncated) break;
 
-        // Enlarge buffer by a number of written
+        // Enlarge buffer by a number of written bytes
         buff_bytes += got_bytes;
 
         bufferptr = safe_realloc((void *) bufferptr, buff_bytes);
