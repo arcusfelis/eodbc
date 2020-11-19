@@ -33,10 +33,21 @@ function install_odbc_ini
 #
 # Be aware, that Driver and Setup values are for Ubuntu.
 # CentOS would use different ones.
+if test -f "/usr/local/lib/libtdsodbc.so"; then
+  # Mac
+  ODBC_DRIVER="/usr/local/lib/libtdsodbc.so"
+fi
+
+if test -f "/usr/lib/x86_64-linux-gnu/odbc/libtdsodbc.so"; then
+  # Ubuntu
+  ODBC_DRIVER="/usr/lib/x86_64-linux-gnu/odbc/libtdsodbc.so"
+  ODBC_SETUP="/usr/lib/x86_64-linux-gnu/odbc/libtdsS.so"
+fi
+
     cat > ~/.odbc.ini << EOL
 [eodbc-mssql]
-Driver      = /usr/lib/x86_64-linux-gnu/odbc/libtdsodbc.so
-Setup       = /usr/lib/x86_64-linux-gnu/odbc/libtdsS.so
+Setup       = $ODBC_SETUP
+Driver      = $ODBC_DRIVER
 Server      = 127.0.0.1
 Port        = 2433
 Database    = eodbc
@@ -44,12 +55,13 @@ Username    = sa
 Password    = eodbc_secret+ESL123
 Charset     = UTF-8
 TDS_Version = 7.2
-client_charset = UTF-8
+client charset = UTF-8
+server charset = UTF-8
 EOL
 }
 
 # Stores all the data needed by the container
-SQL_ROOT_DIR="$(mktemp -d --suffix=eodbc_sql_root)"
+SQL_ROOT_DIR="$(mktemp -d)"
 echo "SQL_ROOT_DIR is $SQL_ROOT_DIR"
 
 # A directory, that contains resources that needed to bootstrap a container
@@ -110,7 +122,7 @@ if [ "$DB" = 'mssql' ]; then
                --health-cmd='/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "eodbc_secret+ESL123" -Q "SELECT 1"' \
                microsoft/mssql-server-linux
     tools/wait_for_healthcheck.sh eodbc-mssql
-    tools/wait_for_service.sh eodbc-mssql 1433
+    tools/wait-for-it.sh -h 127.0.0.1 -p 2433
 
     docker exec -it eodbc-mssql \
         /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "eodbc_secret+ESL123" \
