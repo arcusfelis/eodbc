@@ -22,6 +22,22 @@ create_nvarchar_test() ->
     {updated,1} = eodbc:sql_query(Conn, "insert into test_types values ('test')"),
     {selected,["test_column"],[{<<116,0,101,0,115,0,116,0>>}]} = eodbc:sql_query(Conn, "select test_column from test_types").
 
+%% Big and beautiful
+create_bigint_test() ->
+    Conn = connect_to_database(),
+    eodbc:sql_query(Conn, "drop table test_types"),
+    {updated,undefined} = eodbc:sql_query(Conn, "create table test_types(test_column bigint)"),
+    {selected,["test_column"],[]} = eodbc:sql_query(Conn, "select test_column from test_types"),
+
+    {updated,1} = eodbc:sql_query(Conn, "insert into test_types values (1)"),
+    {selected,["test_column"],[{1}]} = eodbc:sql_query(Conn, "select test_column from test_types"),
+    {updated,1} = eodbc:sql_query(Conn, "delete from test_types"),
+
+    {updated,2} = eodbc:sql_query(Conn, "insert into test_types values "
+                              "(-9223372036854775808), (9223372036854775807)"),
+    {selected,["test_column"],[{-9223372036854775808}, {9223372036854775807}]} =
+      eodbc:sql_query(Conn, "select test_column from test_types order by test_column").
+
 connect_to_database() ->
     application:start(eodbc),
     {ok, Conn} = eodbc:connect("DSN=eodbc-mssql;UID=sa;PWD=eodbc_secret+ESL123", []),

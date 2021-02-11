@@ -1515,6 +1515,24 @@ static void encode_column_dyn(db_column column, int column_nr,
     if (column.type.len == 0 ||
             column.type.strlen_or_indptr == SQL_NULL_DATA) {
         ei_x_encode_atom(&dynamic_buffer(state), "null");
+    } else if ((column.type.sql == SQL_BIGINT) && (column.type.c == SQL_C_CHAR)) {
+            char *bufferptr = NULL;
+            int result_len = 0; /* in bytes */
+            retrive_long_data(column, column_nr, SQL_C_CHAR, &bufferptr, &result_len, 1, 1, state);
+
+            if (result_len == 0) {
+              ei_x_encode_atom(&dynamic_buffer(state), "null");
+            } else if (bufferptr[0] == 45) { // minus sign
+                char *endptr;
+                long long p = strtoll(bufferptr, &endptr, 10);
+                ei_x_encode_longlong(&dynamic_buffer(state), p);
+            } else {
+                char *endptr;
+                unsigned long long p = strtoull(bufferptr, &endptr, 10);
+                ei_x_encode_ulonglong(&dynamic_buffer(state), p);
+            }
+            if (bufferptr)
+                free(bufferptr);
     } else {
         switch(column.type.c) {
         case SQL_C_TYPE_TIMESTAMP:
