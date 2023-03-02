@@ -55,3 +55,12 @@ VARBINARY(MAX)))").
 {selected,[{{sql_wvarchar,536870911},"string"}],
           [{<<104,101,108,108,111,0>>}]}
 ```
+
+# Build HEX package
+
+Use rebar3 to compile a HEX package before releasing it to hex.pm:
+
+```
+rebar3 compile
+rebar3 hex build
+```

@@ -1,6 +1,6 @@
 {application, eodbc,
  [{description, "Erlang ODBC application"},
-  {vsn, "%VSN%"},
+  {vsn, git},
   {modules, [
 	     eodbc,
 	     eodbc_app,
@@ -10,6 +10,8 @@
 		eodbc_sup
 	       ]},
   {applications, [kernel, stdlib]},
-  {env,[]},
+  {env, []},
+  %% Tell rebar3_hex to not include the platform specific binary file
+  {exclude_paths, ["priv/eodbcserver"]},
   {mod, {eodbc_app, []}}]}.
 
